@@ -26,12 +26,10 @@ as a fabricated success.
 ## Install
 
 ```bash
-# v2 is not yet published; install the current source:
-pip install git+https://github.com/OpenAdaptAI/openadapt-agent
+pip install openadapt-agent
 ```
 
-Once published, run it without installing — the intended MCP-client entry
-point:
+Or run it without installing — the intended MCP-client entry point:
 
 ```bash
 uvx openadapt-agent serve --bundles /path/to/bundles          # read-only
