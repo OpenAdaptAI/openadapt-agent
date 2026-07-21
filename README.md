@@ -43,7 +43,15 @@ Design, security model, and what v2.0 deliberately does **not** do:
 
 ```bash
 pip install "openadapt-agent>=2.0.0.dev0"   # not yet published; from source:
-pip install git+https://github.com/OpenAdaptAI/openadapt-agent@feat/mcp-agent-bridge
+pip install git+https://github.com/OpenAdaptAI/openadapt-agent
+```
+
+Once published, run it without installing — the intended MCP-client entry
+point:
+
+```bash
+uvx openadapt-agent serve --bundles /path/to/bundles          # read-only
+uvx openadapt-agent serve --bundles /path/to/bundles --allow-run
 ```
 
 Requires Python 3.10–3.12 (inherited from `openadapt-flow`). Installing
@@ -120,6 +128,26 @@ around it.
   human CLI workflow.
 - **Timeout ≠ rollback.** A killed run may leave the target mid-workflow;
   the outcome says so, but nothing undoes partial work.
+
+## Install as an MCP server (registries)
+
+This package is the **public, official OpenAdapt MCP capability**: inspect
+a compiled bundle and, opt-in, run it under governance. A user's compiled
+workflow bundle is their **private artifact** — it is supplied at launch
+via `--bundles` and is never embedded in the package or any registry
+listing. See [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) for that
+distinction and the publish/submission plan.
+
+Machine-readable launch manifests live at the repo root:
+
+- [`server.json`](server.json) — official [MCP registry](https://github.com/modelcontextprotocol/registry) manifest (PyPI package, `uvx` runtime hint, stdio transport).
+- [`smithery.yaml`](smithery.yaml) — [Smithery](https://smithery.ai) launch config (stdio `startCommand` with a `bundlesDir` / `allowRun` config schema).
+- [`llms.txt`](llms.txt) — a concise, link-first summary for AI assistants.
+
+Registry-launched installs start **read-only by default**; execution
+tools are registered only when the operator adds `--allow-run`.
+
+Documentation: [docs.openadapt.ai](https://docs.openadapt.ai).
 
 ## Development
 
