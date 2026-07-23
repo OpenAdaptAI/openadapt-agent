@@ -248,11 +248,11 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the complete contract.
 
 ## Package history
 
-The pre-v2 package was a wrapper for model-driven GUI agents. Its
-execution responsibilities now live in `openadapt-flow`; the final
-legacy release remains available as `openadapt-agent==0.1.0`. The
-current package name is retained because this repository bridges both
-MCP and Agent Skills; it is not an MCP-only package.
+The pre-v2 codebase was a wrapper for model-driven GUI agents. Its
+execution responsibilities now live in `openadapt-flow`; its source
+history remains in this repository. The current package name is retained
+because this repository bridges both MCP and Agent Skills; it is not an
+MCP-only package.
 
 ## Install as an MCP server (registries)
 
