@@ -619,9 +619,7 @@ def test_the_reject_tool_schema_is_closed_and_needs_explicit_confirmation(
     """Ending a run is not something a model may do by omission."""
     bridge = make_bridge(paused_attention, allow_actions=True, service=None)
     schema = next(
-        spec.input_schema
-        for spec in bridge.list_tool_specs()
-        if spec.name == "reject_attention"
+        spec.input_schema for spec in bridge.list_tool_specs() if spec.name == "reject_attention"
     )
     assert schema["additionalProperties"] is False
     assert schema["properties"]["confirm_run_must_not_proceed"]["const"] is True
