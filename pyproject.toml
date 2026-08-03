@@ -34,7 +34,7 @@ dependencies = [
     # shells out to its CLI; bundle metadata loads via its IR.
     "openadapt-flow>=1.18.1,<2",
     # Official Model Context Protocol SDK (stdio server transport).
-    "mcp>=1.28,<2",
+    "mcp>=1.28,<3",
     # Structured concurrency runtime the mcp SDK already uses; we call
     # anyio.run / to_thread directly.
     "anyio>=4.0",
