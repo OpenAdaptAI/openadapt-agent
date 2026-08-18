@@ -201,6 +201,20 @@ def test_attended_action_requires_protocol_native_human_confirmation():
     assert request_id == "request-123"
 
 
+def test_reject_requires_protocol_native_terminal_confirmation():
+    session = ElicitationSession()
+    anyio.run(
+        _confirm_attended_action,
+        ElicitationServer(session),
+        "reject_attention",
+    )
+    message, schema, request_id = session.calls[0]
+    assert "end this run" in message
+    assert "without resuming or actuating" in message
+    assert schema["properties"]["confirmed"]["type"] == "boolean"
+    assert request_id == "request-123"
+
+
 @pytest.mark.parametrize(
     ("session", "error"),
     [

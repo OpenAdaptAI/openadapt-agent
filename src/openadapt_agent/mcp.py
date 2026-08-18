@@ -48,6 +48,11 @@ _CONFIRMATION_COPY = {
         "Confirm that OpenAdapt should record an audited escalation and preserve "
         "the exact durable pause for qualified assistance."
     ),
+    "reject_attention": (
+        "Confirm that OpenAdapt must end this run without resuming or actuating it. "
+        "The durable pause remains only as the audit record. Use escalation instead "
+        "when a qualified colleague must inspect and possibly continue the run."
+    ),
 }
 
 
