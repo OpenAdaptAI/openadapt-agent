@@ -43,16 +43,15 @@ Python 3.10–3.12 is supported. The package installs a compatible
 
 ## Serve compiled workflows
 
-Compile a workflow with Flow, then serve its bundle directory:
+Create a governed local tutorial bundle through the canonical launcher, then
+serve that bundle directory:
 
 ```bash
-openadapt-flow demo-record --out /tmp/recording
-openadapt-flow compile /tmp/recording \
-  --out /tmp/bundles/triage \
-  --name "Demo Triage"
+pip install 'openadapt[browser]'
+openadapt quickstart --out /tmp/openadapt-agent-demo
 
 openadapt-agent serve \
-  --bundles /tmp/bundles \
+  --bundles /tmp/openadapt-agent-demo/bundle \
   --runs-dir /tmp/openadapt-runs \
   --allow-run
 ```
