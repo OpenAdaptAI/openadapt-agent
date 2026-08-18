@@ -50,9 +50,11 @@ _SAFE_DECISION_MESSAGES = {
     # pause remains; this one says the run is over. A caller told the wrong
     # one of those acts on it.
     "rejected": (
-        "The rejection was recorded and the run is terminal. Nothing was "
-        "actuated, no approval can resume it, and the durable pause is "
-        "retained only as the audit record of what was rejected."
+        "The rejection was recorded and the run is terminal. This rejection "
+        "dispatched no new action. Earlier run actions may have effects; review "
+        "the protected local report and transaction outcome. No approval can "
+        "resume the run. The durable pause is retained only as the audit record "
+        "of what was rejected."
     ),
 }
 
@@ -150,8 +152,10 @@ ATTENDED_TOOLS: dict[str, AttendedTool] = {
             "escalate_attention, which parks the run for a colleague who can "
             "still continue it, and it is not teach_attention, which changes "
             "future runs. It asserts nothing about the saved workflow and "
-            "actuates nothing. Flow independently refuses a rejection whose "
-            "delivery may already have landed."
+            "dispatches no new action. Earlier run actions can still have "
+            "effects, so inspect the protected report and transaction outcome. "
+            "Flow independently refuses a rejection whose delivery may already "
+            "have landed."
         ),
     ),
 }
@@ -235,8 +239,8 @@ class AttendedBridge:
         ``reject_attention`` sits with teach and escalate rather than behind
         ``live_actions_ready``. That gate exists because continue and skip need
         Flow's deployment-bound live executor to re-read the application and
-        act on it. Rejecting actuates nothing and resumes nothing, so it has
-        nothing to gate on -- the same reason Flow's own ``_allowed_actions``
+        act on it. Reject dispatches no new action and resumes nothing, so it
+        has nothing to gate on -- the same reason Flow's own ``_allowed_actions``
         offers it at a pause carrying no resolvable action step at all.
 
         Withholding it would also leave this bridge able to say "proceed" --

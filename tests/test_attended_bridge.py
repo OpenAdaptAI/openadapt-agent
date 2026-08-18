@@ -629,7 +629,7 @@ def test_reject_is_offered_without_a_live_executor_unlike_continue_and_skip(
 
     ``live_actions_ready`` gates continue and skip because they need Flow's
     deployment-bound executor to re-read the application and act on it.
-    Rejecting actuates nothing and resumes nothing, so it has nothing to gate
+    Reject dispatches no new action and resumes nothing, so it has nothing to gate
     on. Gating it anyway would leave a configuration that can say "proceed" --
     which writes to the system of record -- but cannot say "stop", and the only
     thing that removes is the brake.
@@ -658,6 +658,22 @@ def test_reject_ends_the_run_and_is_recorded_as_an_automated_decision(
     person's own console uses, so without this the two are indistinguishable
     and any agreement rate silently mixes them.
     """
+    from openadapt_flow.ir import RunReport, StepResult
+
+    # Model a later pause. A successful earlier step can have an external
+    # effect even though rejection itself dispatches no new action.
+    report_path = paused_attention["run"] / "report.json"
+    report = RunReport.model_validate_json(report_path.read_text())
+    report.results.insert(
+        0,
+        StepResult(
+            step_id="prior",
+            intent="complete an earlier consequential step",
+            ok=True,
+        ),
+    )
+    report.save(paused_attention["run"])
+
     bridge = make_bridge(paused_attention, allow_actions=True, service=None)
     item, arguments = item_and_args(bridge, action="reject")
 
@@ -669,6 +685,14 @@ def test_reject_ends_the_run_and_is_recorded_as_an_automated_decision(
     # the pause remains, this one says the run is over.
     assert "terminal" in result["message"]
     assert "remains available" not in result["message"]
+    assert "dispatched no new action" in result["message"]
+    assert "Earlier run actions may have effects" in result["message"]
+
+    # A reject at a later pause does not erase the completed work before it.
+    # The public response must direct the caller to that protected evidence.
+    report = json.loads(report_path.read_text())
+    assert report["results"][0]["step_id"] == "prior"
+    assert report["results"][0]["ok"] is True
 
     decision = _journal(paused_attention["runs"])[-1]
     assert decision.action == "reject"
@@ -720,3 +744,17 @@ def test_the_reject_tool_schema_is_closed_and_needs_explicit_confirmation(
     # `dispatch` re-raises the bridge's refusal as the public BridgeError.
     with pytest.raises(BridgeError, match="must be explicitly true"):
         bridge.dispatch("reject_attention", arguments)
+
+
+def test_reject_is_exported_as_a_destructive_idempotent_local_mutation(
+    paused_attention,
+):
+    bridge = make_bridge(paused_attention, allow_actions=True, service=None)
+    spec = next(spec for spec in bridge.list_tool_specs() if spec.name == "reject_attention")
+
+    assert spec.annotations == {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
