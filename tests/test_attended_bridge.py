@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -15,7 +17,7 @@ from openadapt_agent.runner import RunnerConfig
 
 
 @pytest.fixture()
-def paused_attention(tmp_path):
+def paused_attention(tmp_path, monkeypatch):
     from openadapt_flow.ir import (
         ActionKind,
         HaltObservation,
@@ -32,6 +34,8 @@ def paused_attention(tmp_path):
         RunManifest,
         issue_attended_capability,
     )
+    from openadapt_flow.runtime.durable.approval import approval_pause_digest
+    from openadapt_flow.runtime.durable.authority import DurableAuthority
 
     workflow = Workflow(
         name="Attended reference",
@@ -60,16 +64,24 @@ def paused_attention(tmp_path):
     workflow.save(bundle)
     runs = tmp_path / "runs"
     run = runs / "run-one"
-    store = CheckpointStore(run)
-    store.write_manifest(
-        RunManifest(
-            run_id="run-instance-a",
-            workflow_name=workflow.name,
-            bundle_dir=str(bundle),
-            params={},
-        )
+    monkeypatch.setenv(
+        "OPENADAPT_DURABLE_AUTHORITY_DB",
+        str(tmp_path / "durable-authority" / "authority.sqlite3"),
     )
+    store = CheckpointStore(run)
+    manifest = RunManifest(
+        run_id="run-instance-a",
+        namespace_id="namespace-instance-a",
+        canonical_run_dir=str(run.resolve()),
+        workflow_name=workflow.name,
+        bundle_dir=str(bundle),
+        params={},
+    )
+    store.write_fresh_manifest(manifest)
+    authority = DurableAuthority(run, store)
+    authority_digest = authority.validate(manifest).progress_digest
     pending = PendingEscalation(
+        run_id=manifest.run_id,
         workflow_name=workflow.name,
         step_index=0,
         step_id="human",
@@ -104,6 +116,12 @@ def paused_attention(tmp_path):
         workflow=workflow,
         result=failed,
     )
+    authority.advance(
+        manifest,
+        expected_progress_digest=authority_digest,
+        phase="paused",
+        pause_binding_sha256=approval_pause_digest(pending),
+    )
     return {
         "bundle": bundle,
         "bundles": bundle.parent,
@@ -117,21 +135,87 @@ def paused_attention(tmp_path):
 class ResultExecutor:
     def __init__(self):
         self.calls = 0
+        self.actions = []
 
-    def continue_run(self, _run_dir, capability, _approval):
-        from openadapt_flow.runtime.durable import AttendedExecutionResult
+        from openadapt_flow.runtime.durable import BoundAttendedExecutor
+        from openadapt_flow.runtime.replayer import Replayer
 
-        self.calls += 1
-        return AttendedExecutionResult(
-            status="completed",
-            message="human outcome verified; deterministic continuation completed",
-            report_success=True,
-            resumed_from=capability.step_id,
-            next_transition=capability.expected_next_transition,
+        actions = self.actions
+
+        class Backend:
+            viewport = (300, 200)
+
+            def __init__(self):
+                from PIL import Image
+
+                buffer = io.BytesIO()
+                Image.new("RGB", self.viewport, (240, 240, 240)).save(buffer, format="PNG")
+                self.frame = buffer.getvalue()
+                self.guarded_keyboard_point = None
+
+            def screenshot(self):
+                return self.frame
+
+            def press(self, key):
+                actions.append(("press", key))
+
+            def guarded_keyboard_frame(self):
+                return self.frame
+
+            def arm_guarded_keyboard(self, x, y):
+                self.guarded_keyboard_point = (int(x), int(y))
+
+            def cancel_guarded_keyboard(self):
+                self.guarded_keyboard_point = None
+
+            def press_guarded(self, key, *, expected_frame_sha256):
+                from openadapt_flow.ir import ActionDeliveryReceipt
+
+                assert self.guarded_keyboard_point is not None
+                self.guarded_keyboard_point = None
+                assert hashlib.sha256(self.frame).hexdigest() == expected_frame_sha256
+                actions.append(("press", key))
+                return ActionDeliveryReceipt(
+                    receipt_id=f"agent-test-{len(actions)}",
+                    operation="physical_press",
+                    native=False,
+                    delivered_at="2026-07-25T00:00:00+00:00",
+                )
+
+        class Vision:
+            @staticmethod
+            def text_present(_screen_png, text, *, region=None, min_ratio=0.8):
+                del region, min_ratio
+                return text == "DONE"
+
+            @staticmethod
+            def wait_settled(backend, **_kwargs):
+                return backend.screenshot()
+
+            @staticmethod
+            def phash_png(_png, region=None):
+                del region
+                return "aa"
+
+            @staticmethod
+            def phash_distance(_left, _right):
+                return 0
+
+        self.bound = BoundAttendedExecutor(
+            lambda _manifest: Replayer(
+                Backend(),
+                vision=Vision(),
+                poll_interval_s=0.0,
+            )
         )
 
+    def continue_run(self, run_dir, capability, approval):
+        self.calls += 1
+        return self.bound.continue_run(run_dir, capability, approval)
+
     def skip_run(self, run_dir, capability, approval):
-        return self.continue_run(run_dir, capability, approval)
+        self.calls += 1
+        return self.bound.skip_run(run_dir, capability, approval)
 
 
 class FailingExecutor(ResultExecutor):
@@ -253,6 +337,7 @@ def test_continue_is_exactly_bound_and_idempotent_without_reactuation(
     assert first["status"] == "completed"
     assert first["success"] is True
     assert executor.calls == 1
+    assert executor.actions == [("press", "Tab")]
     decisions = json.loads((paused_attention["run"] / "attended_decisions.json").read_text())[
         "decisions"
     ]
