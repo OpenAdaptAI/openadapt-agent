@@ -93,9 +93,13 @@ except on a deliberate version-tag push.
   (fails if a wheel/sdist carries a bundle, `.enc`, run outputs, keys, or
   any non-code payload — the license/boundary gate), checks the MCPB for
   workflow/evidence payloads, runs `twine check`, validates `server.json`
-  against its live schema, and runs the
+  against the exact MCP schema at the pinned `2025-12-11` URL and SHA-256
+  `3fba09590c99f61735d234822279f4223fab9e300c0a81e81c91ab62a4114de0`,
+  and runs the
   version-consistency guard (`tests/test_distribution.py`). It runs on PRs
   and manual dispatch so the pipeline is testable **without** publishing.
+  An unavailable schema or changed schema bytes fail validation before any
+  publisher can run.
 - **`pypi-publish`** (tag push only) asserts the tag matches the
   package version, then uploads via **PyPI Trusted Publishing (OIDC)** —
   no long-lived token. Runs in the `pypi` GitHub environment (add required
