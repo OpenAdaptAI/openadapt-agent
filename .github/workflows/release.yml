@@ -27,6 +27,7 @@ on:
       - "src/openadapt_agent/mcpb_entry.py"
       - "scripts/check_mcpb.py"
       - "scripts/check_release_artifacts.py"
+      - "scripts/validate_server_schema.py"
       - "scripts/verify_release_registries.py"
       - "schemas/production-lifecycle-admission-candidate.schema.json"
       - "scripts/check_dist.py"
@@ -80,22 +81,7 @@ jobs:
           npx -y @anthropic-ai/mcpb@2.1.2 pack . "mcpb-dist/openadapt-agent-${version}.mcpb"
           python scripts/check_mcpb.py mcpb-dist/*.mcpb
       - name: Validate server.json against the MCP registry schema
-        run: |
-          python - <<'PY'
-          import json, sys, urllib.request
-          from jsonschema import Draft202012Validator
-          doc = json.load(open("server.json"))
-          url = doc["$schema"]
-          try:
-              schema = json.load(urllib.request.urlopen(url, timeout=30))
-          except Exception as exc:  # network hiccup: don't fail the dry run
-              print(f"WARNING: could not fetch {url}: {exc}; skipping live schema check")
-              sys.exit(0)
-          errors = sorted(Draft202012Validator(schema).iter_errors(doc), key=lambda e: list(e.path))
-          for e in errors:
-              print("SCHEMA ERROR:", list(e.path), e.message)
-          sys.exit(1 if errors else 0)
-          PY
+        run: python scripts/validate_server_schema.py --server-json server.json
       - name: Upload built distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

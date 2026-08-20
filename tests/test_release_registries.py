@@ -22,6 +22,13 @@ assert SPEC is not None and SPEC.loader is not None
 VERIFY = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = VERIFY
 SPEC.loader.exec_module(VERIFY)
+SCHEMA_SPEC = importlib.util.spec_from_file_location(
+    "validate_server_schema", ROOT / "scripts" / "validate_server_schema.py"
+)
+assert SCHEMA_SPEC is not None and SCHEMA_SPEC.loader is not None
+SCHEMA_VALIDATOR = importlib.util.module_from_spec(SCHEMA_SPEC)
+sys.modules[SCHEMA_SPEC.name] = SCHEMA_VALIDATOR
+SCHEMA_SPEC.loader.exec_module(SCHEMA_VALIDATOR)
 MCP_REGISTRY = VERIFY.MCP_REGISTRY
 MCP_SERVER_NAME = VERIFY.MCP_SERVER_NAME
 PYPI_PROJECT = VERIFY.PYPI_PROJECT
@@ -30,6 +37,9 @@ _policy_binding = VERIFY._policy_binding
 build_candidate = VERIFY.build_candidate
 verify_mcp_registry = VERIFY.verify_mcp_registry
 verify_pypi = VERIFY.verify_pypi
+RegistrySchemaError = SCHEMA_VALIDATOR.RegistrySchemaError
+SCHEMA_URL = SCHEMA_VALIDATOR.SCHEMA_URL
+validate_server_schema = SCHEMA_VALIDATOR.validate_server_schema
 VERSION = "9.8.7"
 SOURCE_COMMIT = "a" * 40
 POLICY_COMMIT = "b" * 40
@@ -232,3 +242,28 @@ def test_release_orders_publish_parity_then_candidate_and_pins_publisher() -> No
     assert 'publisher_version="1.8.1"' in workflow
     assert "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc" in workflow
     assert "production-lifecycle-admissions.json" not in workflow
+
+
+def test_unavailable_registry_schema_refuses_validation(tmp_path: Path) -> None:
+    server_path, _ = _server_json(tmp_path)
+
+    def unavailable(_url: str) -> bytes:
+        raise OSError("offline")
+
+    with pytest.raises(RegistrySchemaError, match="could not download the pinned MCP schema"):
+        validate_server_schema(server_path, fetch=unavailable)
+
+
+def test_changed_registry_schema_bytes_refuse_validation(tmp_path: Path) -> None:
+    server_path, _ = _server_json(tmp_path)
+
+    with pytest.raises(RegistrySchemaError, match="pinned MCP schema digest mismatch"):
+        validate_server_schema(server_path, fetch=lambda _url: b"{}")
+
+
+def test_release_validation_uses_the_fail_closed_schema_guard() -> None:
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "python scripts/validate_server_schema.py --server-json server.json" in workflow
+    assert "skipping live schema check" not in workflow
+    assert 'release:\n    types: [published]' not in workflow
