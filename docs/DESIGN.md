@@ -1,7 +1,5 @@
 # OpenAdapt Agent design
 
-**Lifecycle: Beta.**
-
 `openadapt-agent` is the local agent-facing bridge for compiled
 `openadapt-flow` workflows. It exposes two complementary interfaces:
 

@@ -1,6 +1,5 @@
 # OpenAdapt Agent
 
-[![Lifecycle: Beta](https://img.shields.io/badge/lifecycle-Beta-2563eb)](https://github.com/OpenAdaptAI/openadapt-agent)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)](https://www.python.org/downloads/)
 
