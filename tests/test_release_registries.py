@@ -224,11 +224,25 @@ def test_release_orders_publish_parity_then_candidate_and_pins_publisher() -> No
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     publish = workflow.index("./mcp-publisher publish")
     parity = workflow.index("python scripts/verify_release_registries.py")
-    retain = workflow.index("Retain the content-bound admission candidate")
+    retain = workflow.index("Upload the bounded admission-candidate handoff")
     assert publish < parity < retain
     assert "registry-parity:" in workflow
     assert "needs: [validate, mcp-registry-publish]" in workflow
+    assert "name: Verify registries + upload admission handoff" in workflow
+    assert "retention-days: 30" in workflow
     assert "releases/latest/download" not in workflow
     assert 'publisher_version="1.8.1"' in workflow
     assert "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc" in workflow
     assert "production-lifecycle-admissions.json" not in workflow
+
+
+def test_tag_push_is_the_only_authoritative_publish_trigger() -> None:
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    publish_guard = (
+        "if: ${{ github.event_name == 'push' "
+        "&& startsWith(github.ref, 'refs/tags/v') }}"
+    )
+
+    assert workflow.count(publish_guard) == 3
+    assert "\n  release:\n" not in workflow
+    assert "github.event.release" not in workflow

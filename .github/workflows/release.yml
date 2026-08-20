@@ -1,8 +1,8 @@
 name: Release
 
 # Builds the package, gates it on the license/boundary check, and — ONLY on
-# a version tag or a published GitHub Release — publishes to PyPI and to the
-# official MCP registry. A normal push or PR runs the validate job only
+# a version tag push — publishes to PyPI and to the
+# official MCP registry. A pull request or manual run starts validation only
 # (dry run, no publish), so the workflow itself is testable without shipping.
 #
 # Auth is OIDC-first and secret-free for the io.github.OpenAdaptAI namespace:
@@ -15,8 +15,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  release:
-    types: [published]
   workflow_dispatch:
   pull_request:
     paths:
@@ -112,7 +110,7 @@ jobs:
   pypi-publish:
     name: Publish to PyPI
     needs: validate
-    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'release' }}
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -125,11 +123,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "release" ]; then
-            tag="${{ github.event.release.tag_name }}"
-          else
-            tag="${GITHUB_REF#refs/tags/}"
-          fi
+          tag="${GITHUB_REF#refs/tags/}"
           tag_version="${tag#v}"
           pkg_version="$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
           echo "version=${pkg_version}" >> "$GITHUB_OUTPUT"
@@ -171,7 +165,7 @@ jobs:
   mcp-registry-publish:
     name: Publish server.json to the MCP registry
     needs: [validate, pypi-publish]
-    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'release' }}
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write # OIDC for `mcp-publisher login github-oidc`
@@ -183,11 +177,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "release" ]; then
-            tag="${{ github.event.release.tag_name }}"
-          else
-            tag="${GITHUB_REF#refs/tags/}"
-          fi
+          tag="${GITHUB_REF#refs/tags/}"
           pkg_version="$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
           if [ "${tag#v}" != "${pkg_version}" ]; then
             echo "::error::Release tag '${tag}' does not match package version '${pkg_version}'." >&2
@@ -249,9 +239,9 @@ jobs:
         run: ./mcp-publisher publish
 
   registry-parity:
-    name: Verify registries + retain admission input
+    name: Verify registries + upload admission handoff
     needs: [validate, mcp-registry-publish]
-    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'release' }}
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -262,11 +252,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "release" ]; then
-            tag="${{ github.event.release.tag_name }}"
-          else
-            tag="${GITHUB_REF#refs/tags/}"
-          fi
+          tag="${GITHUB_REF#refs/tags/}"
           pkg_version="$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
           if [ "${tag#v}" != "${pkg_version}" ]; then
             echo "::error::Release tag '${tag}' does not match package version '${pkg_version}'." >&2
@@ -304,7 +290,7 @@ jobs:
             --attempts 20 \
             --retry-seconds 15
           sha256sum release-metadata/production-admission-candidate.json
-      - name: Retain the content-bound admission candidate
+      - name: Upload the bounded admission-candidate handoff
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: production-admission-candidate-${{ steps.ver.outputs.version }}

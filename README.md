@@ -275,8 +275,8 @@ Registry-launched installs start **read-only by default**; execution
 tools are registered only when the operator adds `--allow-run`.
 
 Publishing is automated: [`.github/workflows/release.yml`](.github/workflows/release.yml)
-builds, runs the license/boundary gate, and — only on a `vX.Y.Z` tag or a
-published Release — ships to PyPI (Trusted Publishing, OIDC) and the MCP
+builds, runs the license/boundary gate, and — only on a pushed `vX.Y.Z` tag —
+ships to PyPI (Trusted Publishing, OIDC) and the MCP
 registry (`mcp-publisher login github-oidc`), secret-free. It runs a dry
 run (no publish) on PRs and manual dispatch. See
 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) for the one-time founder

@@ -79,14 +79,14 @@ remains for the founder is a small set of **one-time identity/config
 actions** (create accounts, enable Trusted Publishing, claim directory
 listings) that mint public first-party identities and therefore stay
 founder-authorized. Nothing publishes to a public index automatically
-except on a deliberate version tag / GitHub Release.
+except on a deliberate version-tag push.
 
 ### 3.0 What the workflow does (AUTOMATED)
 
 | Trigger | Jobs that run | Publishes? |
 | --- | --- | --- |
-| Pull request touching release files, or `workflow_dispatch`, or any tag/release | `validate` (Python build, MCPB build, archive boundary checks, `twine check`, registry schema validation) | **No** — dry run |
-| Push a `vX.Y.Z` tag, or publish a GitHub Release | `validate` -> `pypi-publish` -> `mcp-registry-publish` | **Yes** |
+| Pull request touching release files, or `workflow_dispatch` | `validate` (Python build, MCPB build, archive boundary checks, `twine check`, registry schema validation) | **No** — dry run |
+| Push a `vX.Y.Z` tag | `validate` -> `pypi-publish` -> `mcp-registry-publish` -> `registry-parity` | **Yes** |
 
 - **`validate`** builds the sdist+wheel and local MCPB, runs
   [`scripts/check_release_artifacts.py`](../scripts/check_release_artifacts.py)
@@ -96,11 +96,11 @@ except on a deliberate version tag / GitHub Release.
   against its live schema, and runs the
   version-consistency guard (`tests/test_distribution.py`). It runs on PRs
   and manual dispatch so the pipeline is testable **without** publishing.
-- **`pypi-publish`** (tag/release only) asserts the tag matches the
+- **`pypi-publish`** (tag push only) asserts the tag matches the
   package version, then uploads via **PyPI Trusted Publishing (OIDC)** —
   no long-lived token. Runs in the `pypi` GitHub environment (add required
   reviewers there if you want a human approval gate on every publish).
-- **`mcp-registry-publish`** (tag/release only) waits for the new version
+- **`mcp-registry-publish`** (tag push only) waits for the new version
   to be live on PyPI (the registry validates package existence), then
   `mcp-publisher login github-oidc` + `mcp-publisher publish` — no token,
   because the repo lives under the `OpenAdaptAI` org that owns the
@@ -110,21 +110,26 @@ except on a deliberate version tag / GitHub Release.
   workflow downloads each PyPI artifact and proves byte-for-byte equality
   with the archives produced by the protected build. It also proves that the
   exact and `latest` MCP registry records equal the reviewed `server.json`.
-  Only then does it retain a 30-day
-  `production-admission-candidate-<version>` artifact. That record binds the
-  source commit, artifact hashes, both public registry observations, and one
-  exact commit of the canonical lifecycle policy.
+  Only then does it upload a 30-day
+  `production-admission-candidate-<version>` handoff artifact. That record
+  binds the source commit, artifact hashes, both public registry observations,
+  and one exact commit of the canonical lifecycle policy. The Actions artifact
+  is a bounded transport copy. It is not the long-term evidence record. Before
+  activation, the central admission process must verify its exact digest and
+  copy it with the supporting release evidence into the immutable evidence
+  store. If that handoff expires before the copy, registry parity must run
+  again.
 
-The retained record is explicitly `not_admitted`. It has no admission ID,
+The candidate record is explicitly `not_admitted`. It has no admission ID,
 release sequence, or Production channel selector. PyPI `latest` and MCP
 `latest` are distribution checks only. They never grant Production status.
 The active, signed ledger in `OpenAdaptAI/.github` is the sole Production
 authority and requires its separate acceptance evidence and activation.
 
 To cut a release: bump the synchronized version fields (see §3.1), merge, then
-`git tag vX.Y.Z && git push origin vX.Y.Z` (or publish a Release with that
-tag). The first tag you push IS the first real publish — do it
-deliberately.
+use the release App to create and push `vX.Y.Z`. The tag push is the one
+authoritative publish event. Creating or publishing the GitHub Release does not
+start another publisher run.
 
 ### 3.a Required repo configuration and secrets (FOUNDER, one-time)
 
@@ -165,7 +170,7 @@ both `version` fields in `server.json`, and `manifest.json` `version`. The
 
 ### 3.2 Publish to PyPI — AUTOMATED (`pypi-publish` job)
 
-Fires automatically on a `vX.Y.Z` tag / Release once §3.a step 1-2 are
+Fires automatically on a pushed `vX.Y.Z` tag once §3.a step 1-2 are
 done. To reproduce locally (dry run or a manual emergency publish):
 
 ```bash
