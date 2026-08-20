@@ -14,6 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 CANDIDATE_SCHEMA = ROOT / "schemas" / "production-lifecycle-admission-candidate.schema.json"
+MCPB_IGNORE = ROOT / ".mcpbignore"
 SPEC = importlib.util.spec_from_file_location(
     "verify_release_registries", ROOT / "scripts" / "verify_release_registries.py"
 )
@@ -216,6 +217,7 @@ def test_candidate_schema_is_closed_and_marks_the_record_not_admitted() -> None:
     assert schema["properties"]["admission_status"] == {"const": "not_admitted"}
     assert "admission_id" not in schema["properties"]
     assert "release_identity" not in schema["properties"]
+    assert "schemas/" in MCPB_IGNORE.read_text(encoding="utf-8").splitlines()
 
 
 def test_release_orders_publish_parity_then_candidate_and_pins_publisher() -> None:
