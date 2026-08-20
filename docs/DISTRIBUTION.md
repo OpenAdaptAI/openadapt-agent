@@ -104,7 +104,22 @@ except on a deliberate version tag / GitHub Release.
   to be live on PyPI (the registry validates package existence), then
   `mcp-publisher login github-oidc` + `mcp-publisher publish` — no token,
   because the repo lives under the `OpenAdaptAI` org that owns the
-  `io.github.OpenAdaptAI` namespace.
+  `io.github.OpenAdaptAI` namespace. The workflow downloads a fixed
+  `mcp-publisher` version and verifies its SHA-256 before execution.
+- **Registry parity and admission input** run after both publishes. The
+  workflow downloads each PyPI artifact and proves byte-for-byte equality
+  with the archives produced by the protected build. It also proves that the
+  exact and `latest` MCP registry records equal the reviewed `server.json`.
+  Only then does it retain a 30-day
+  `production-admission-candidate-<version>` artifact. That record binds the
+  source commit, artifact hashes, both public registry observations, and one
+  exact commit of the canonical lifecycle policy.
+
+The retained record is explicitly `not_admitted`. It has no admission ID,
+release sequence, or Production channel selector. PyPI `latest` and MCP
+`latest` are distribution checks only. They never grant Production status.
+The active, signed ledger in `OpenAdaptAI/.github` is the sole Production
+authority and requires its separate acceptance evidence and activation.
 
 To cut a release: bump the synchronized version fields (see §3.1), merge, then
 `git tag vX.Y.Z && git push origin vX.Y.Z` (or publish a Release with that
