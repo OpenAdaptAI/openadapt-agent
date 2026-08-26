@@ -86,6 +86,11 @@ jobs:
               --requested-source-commit "${REQUESTED_SOURCE_COMMIT}"
             )
           elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            if [ "${GITHUB_ACTOR}" != "openadapt-release[bot]" ] || \
+               [ "${GITHUB_TRIGGERING_ACTOR}" != "openadapt-release[bot]" ]; then
+              echo "::error::Only the release App can start tag publication." >&2
+              exit 1
+            fi
             if [ "$(git cat-file -t "${GITHUB_REF}")" != "tag" ]; then
               echo "::error::A release tag must be annotated." >&2
               exit 1

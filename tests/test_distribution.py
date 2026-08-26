@@ -87,6 +87,13 @@ def test_release_workflow_runs_the_complete_archive_boundary() -> None:
     assert "python scripts/check_source_boundary.py --require-dist" in workflow
 
 
+def test_release_tag_publication_accepts_only_the_release_app() -> None:
+    """A user-created tag must not reach either protected publisher."""
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    assert '[ "${GITHUB_ACTOR}" != "openadapt-release[bot]" ]' in workflow
+    assert '[ "${GITHUB_TRIGGERING_ACTOR}" != "openadapt-release[bot]" ]' in workflow
+
+
 def test_release_actions_are_pinned_to_commits() -> None:
     """Every action on the publish path must be a full 40-char commit SHA.
 
