@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 CANDIDATE_SCHEMA = ROOT / "schemas" / "production-lifecycle-admission-candidate.schema.json"
 MCPB_IGNORE = ROOT / ".mcpbignore"
+RELEASE_CANDIDATE = ROOT / "release-candidate.json"
 SPEC = importlib.util.spec_from_file_location(
     "verify_release_registries", ROOT / "scripts" / "verify_release_registries.py"
 )
@@ -29,6 +30,13 @@ assert SCHEMA_SPEC is not None and SCHEMA_SPEC.loader is not None
 SCHEMA_VALIDATOR = importlib.util.module_from_spec(SCHEMA_SPEC)
 sys.modules[SCHEMA_SPEC.name] = SCHEMA_VALIDATOR
 SCHEMA_SPEC.loader.exec_module(SCHEMA_VALIDATOR)
+CANDIDATE_SPEC = importlib.util.spec_from_file_location(
+    "verify_release_candidate", ROOT / "scripts" / "verify_release_candidate.py"
+)
+assert CANDIDATE_SPEC is not None and CANDIDATE_SPEC.loader is not None
+CANDIDATE = importlib.util.module_from_spec(CANDIDATE_SPEC)
+sys.modules[CANDIDATE_SPEC.name] = CANDIDATE
+CANDIDATE_SPEC.loader.exec_module(CANDIDATE)
 MCP_REGISTRY = VERIFY.MCP_REGISTRY
 MCP_SERVER_NAME = VERIFY.MCP_SERVER_NAME
 PYPI_PROJECT = VERIFY.PYPI_PROJECT
@@ -40,6 +48,10 @@ verify_pypi = VERIFY.verify_pypi
 RegistrySchemaError = SCHEMA_VALIDATOR.RegistrySchemaError
 SCHEMA_URL = SCHEMA_VALIDATOR.SCHEMA_URL
 validate_server_schema = SCHEMA_VALIDATOR.validate_server_schema
+CandidateError = CANDIDATE.CandidateError
+load_and_verify_candidate = CANDIDATE.load_and_verify_candidate
+verify_event_binding = CANDIDATE.verify_event_binding
+verify_repository_binding = CANDIDATE.verify_repository_binding
 VERSION = "9.8.7"
 SOURCE_COMMIT = "a" * 40
 POLICY_COMMIT = "b" * 40
@@ -230,18 +242,140 @@ def test_candidate_schema_is_closed_and_marks_the_record_not_admitted() -> None:
     assert "schemas/" in MCPB_IGNORE.read_text(encoding="utf-8").splitlines()
 
 
+def test_reviewed_tag_candidate_is_closed_versioned_and_not_admitted() -> None:
+    candidate = load_and_verify_candidate()
+    raw = json.loads(RELEASE_CANDIDATE.read_text(encoding="utf-8"))
+
+    assert set(raw) == CANDIDATE.CANDIDATE_KEYS
+    assert candidate["candidate_role"] == "release_tag_input"
+    assert candidate["admission_status"] == "not_admitted"
+    assert candidate["tag"] == f"v{candidate['version']}"
+    assert candidate["changelog_heading"] == f"## [{candidate['version']}]"
+    ignored = MCPB_IGNORE.read_text(encoding="utf-8").splitlines()
+    assert "release-candidate.json" in ignored
+    assert "CHANGELOG.md" in ignored
+
+
+def test_manual_tag_event_requires_exact_main_version_and_commit() -> None:
+    candidate = load_and_verify_candidate()
+    source_commit = "a" * 40
+    verify_event_binding(
+        candidate,
+        event_name="workflow_dispatch",
+        ref="refs/heads/main",
+        source_commit=source_commit,
+        requested_version=candidate["version"],
+        requested_source_commit=source_commit,
+    )
+
+    mismatches = [
+        {"ref": "refs/heads/feature"},
+        {"requested_version": "99.0.0"},
+        {"requested_source_commit": "b" * 40},
+        {"source_commit": "short"},
+    ]
+    base = {
+        "event_name": "workflow_dispatch",
+        "ref": "refs/heads/main",
+        "source_commit": source_commit,
+        "requested_version": candidate["version"],
+        "requested_source_commit": source_commit,
+    }
+    for change in mismatches:
+        with pytest.raises(CandidateError):
+            verify_event_binding(candidate, **(base | change))
+
+
+def test_tag_publication_requires_the_exact_candidate_tag() -> None:
+    candidate = load_and_verify_candidate()
+    verify_event_binding(
+        candidate,
+        event_name="push",
+        ref=f"refs/tags/{candidate['tag']}",
+        source_commit="a" * 40,
+    )
+    with pytest.raises(CandidateError, match="pushed tag differs"):
+        verify_event_binding(
+            candidate,
+            event_name="push",
+            ref="refs/tags/v99.0.0",
+            source_commit="a" * 40,
+        )
+
+
+def test_candidate_binds_head_and_the_annotated_previous_tag() -> None:
+    candidate = load_and_verify_candidate()
+    source_commit = CANDIDATE._git(ROOT, "rev-parse", "HEAD").stdout.strip()
+
+    verify_repository_binding(candidate, source_commit)
+    with pytest.raises(CandidateError, match="differs from repository HEAD"):
+        verify_repository_binding(candidate, "a" * 40)
+
+
 def test_release_orders_publish_parity_then_candidate_and_pins_publisher() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     publish = workflow.index("./mcp-publisher publish")
     parity = workflow.index("python scripts/verify_release_registries.py")
-    retain = workflow.index("Retain the content-bound admission candidate")
+    retain = workflow.index("Upload the bounded admission-candidate handoff")
     assert publish < parity < retain
     assert "registry-parity:" in workflow
-    assert "needs: [validate, mcp-registry-publish]" in workflow
+    assert "needs: [validate, pypi-publish, mcp-registry-publish]" in workflow
     assert "releases/latest/download" not in workflow
     assert 'publisher_version="1.8.1"' in workflow
     assert "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc" in workflow
     assert "production-lifecycle-admissions.json" not in workflow
+
+
+def test_release_app_can_create_only_the_reviewed_annotated_tag() -> None:
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "environment: release-identity" in workflow
+    assert "actions/create-github-app-token@" in workflow
+    assert "vars.OPENADAPT_RELEASE_APP_ID" in workflow
+    assert "secrets.OPENADAPT_RELEASE_APP_PRIVATE_KEY" in workflow
+    assert "repositories: openadapt-agent" in workflow
+    assert "permission-contents: write" in workflow
+    assert 'git tag -a "${RELEASE_TAG}" "${EXPECTED_SOURCE_COMMIT}"' in workflow
+    pushes = [line.strip() for line in workflow.splitlines() if "push origin" in line]
+    assert pushes == ['git push origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"']
+    assert "push origin HEAD" not in workflow
+    assert "refs/heads/main:refs/heads/main" not in workflow
+
+
+def test_publication_uses_separate_oidc_environments_without_token_fallbacks() -> None:
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "environment: pypi" in workflow
+    assert "environment: mcp-registry" in workflow
+    assert workflow.count("id-token: write") == 2
+    assert "pypa/gh-action-pypi-publish@" in workflow
+    assert "./mcp-publisher login github-oidc" in workflow
+    for forbidden in (
+        "ADMIN_TOKEN",
+        "PYPI_API_TOKEN",
+        "MCP_GITHUB_TOKEN",
+        "PYPI_PUBLISH_METHOD",
+        "MCP_PUBLISH_METHOD",
+        "registry/releases/latest/download",
+        "\n  release:\n",
+        "github.event.release",
+    ):
+        assert forbidden not in workflow
+
+
+def test_tag_jobs_fail_closed_and_recovery_reuses_the_exact_tag_run() -> None:
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    publish_guard = (
+        "if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}"
+    )
+
+    assert workflow.count(publish_guard) == 3
+    assert "cancel-in-progress: false" in workflow
+    assert "The exact annotated release tag already exists. No ref changed." in workflow
+    assert "A release tag must be annotated." in workflow
+    assert '--event-name "${GITHUB_EVENT_NAME}"' in workflow
+    assert '--ref "${GITHUB_REF}"' in workflow
+    assert "recovery/" not in workflow
 
 
 def test_unavailable_registry_schema_refuses_validation(tmp_path: Path) -> None:
@@ -266,4 +400,4 @@ def test_release_validation_uses_the_fail_closed_schema_guard() -> None:
 
     assert "python scripts/validate_server_schema.py --server-json server.json" in workflow
     assert "skipping live schema check" not in workflow
-    assert 'release:\n    types: [published]' not in workflow
+    assert "release:\n    types: [published]" not in workflow

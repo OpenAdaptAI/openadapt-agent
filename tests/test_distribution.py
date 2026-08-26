@@ -84,6 +84,7 @@ def test_release_workflow_runs_the_complete_archive_boundary() -> None:
     assert '- "scripts/check_dist.py"' in workflow
     assert "python scripts/check_release_artifacts.py dist" in workflow
     assert "python scripts/check_dist.py dist/*" in workflow
+    assert "python scripts/check_source_boundary.py --require-dist" in workflow
 
 
 def test_release_actions_are_pinned_to_commits() -> None:

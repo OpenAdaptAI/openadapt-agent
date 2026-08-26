@@ -91,8 +91,7 @@ def validate_server_schema(
     errors = sorted(validator.iter_errors(descriptor), key=lambda item: list(item.absolute_path))
     if errors:
         details = "; ".join(
-            f"{'.'.join(str(value) for value in error.absolute_path) or '<root>'}: "
-            f"{error.message}"
+            f"{'.'.join(str(value) for value in error.absolute_path) or '<root>'}: {error.message}"
             for error in errors
         )
         raise RegistrySchemaError(f"server.json does not match the pinned MCP schema: {details}")

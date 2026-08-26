@@ -12,7 +12,9 @@ tests/
 **/__pycache__/
 *.pyc
 CLAUDE.md
+CHANGELOG.md
 SECURITY.md
 llms.txt
+release-candidate.json
 server.json
 source-policy.public.json

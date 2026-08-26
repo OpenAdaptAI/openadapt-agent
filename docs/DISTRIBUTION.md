@@ -5,9 +5,9 @@ A missing, expired, revoked, mismatched, or unverifiable admission means **not
 actively admitted**. This document describes how the package is made
 installable and discoverable as an MCP server, the security-relevant
 distinction between the *public capability* and a *user's private
-bundle*, and the exact founder-owned steps to publish and list it. The
-publish/submission steps are **not automated here** — they mint public,
-first-party identities and are outward-facing founder actions.
+bundle*, and the protected steps to publish and list it. The registry jobs are
+automated after the founder approves one exact release. First-time account and
+directory claims remain founder actions.
 
 ## 1. The public capability vs the user's private artifact
 
@@ -75,25 +75,24 @@ and [`../manifest.json`](../manifest.json).
 
 ## 3. Release automation vs. founder one-time actions
 
-The build-and-publish pipeline is **automated** in
-[`.github/workflows/release.yml`](../.github/workflows/release.yml). What
-remains for the founder is a small set of **one-time identity/config
-actions** (create accounts, enable Trusted Publishing, claim directory
-listings) that mint public first-party identities and therefore stay
-founder-authorized. Nothing publishes to a public index automatically
-except on a deliberate version tag / GitHub Release.
+The build-and-publish pipeline lives in
+[`.github/workflows/release.yml`](../.github/workflows/release.yml). The
+founder reviews one exact protected-main commit before the release App creates
+its annotated tag. That tag starts the separate PyPI and MCP registry jobs.
+The App can't push a commit to `main`.
 
-### 3.0 What the workflow does (AUTOMATED)
+### 3.0 What the workflow does
 
 | Trigger | Jobs that run | Publishes? |
 | --- | --- | --- |
-| Pull request touching release files, or `workflow_dispatch`, or any tag/release | `validate` (Python build, MCPB build, archive boundary checks, `twine check`, registry schema validation) | **No** — dry run |
-| Push a `vX.Y.Z` tag, or publish a GitHub Release | `validate` -> `pypi-publish` -> `mcp-registry-publish` | **Yes** |
+| Pull request touching release files | `validate` | No. This is a dry run. |
+| Manual dispatch on exact current `main` | `validate`, then founder review in `release-identity`, then `create-release-tag` | No package publish. The App creates only the annotated tag. |
+| Push of the exact reviewed annotated tag | `validate` -> `pypi-publish` -> `mcp-registry-publish` -> `registry-parity` | Yes, after the two protected publication environments approve it. |
 
 - **`validate`** builds the sdist+wheel and local MCPB, runs
   [`scripts/check_release_artifacts.py`](../scripts/check_release_artifacts.py)
-  (fails if a wheel/sdist carries a bundle, `.enc`, run outputs, keys, or
-  any non-code payload — the license/boundary gate), checks the MCPB for
+  (fails if a wheel or sdist carries a bundle, `.enc`, run outputs, keys, or
+  any non-code payload), checks the MCPB for
   workflow/evidence payloads, runs `twine check`, validates `server.json`
   against the exact MCP schema at the pinned `2025-12-11` URL and SHA-256
   `3fba09590c99f61735d234822279f4223fab9e300c0a81e81c91ab62a4114de0`,
@@ -102,13 +101,18 @@ except on a deliberate version tag / GitHub Release.
   and manual dispatch so the pipeline is testable **without** publishing.
   An unavailable schema or changed schema bytes fail validation before any
   publisher can run.
-- **`pypi-publish`** (tag push only) asserts the tag matches the
-  package version, then uploads via **PyPI Trusted Publishing (OIDC)** —
-  no long-lived token. Runs in the `pypi` GitHub environment (add required
-  reviewers there if you want a human approval gate on every publish).
-- **`mcp-registry-publish`** (tag/release only) waits for the new version
+- **`create-release-tag`** runs only after the manual version and full commit
+  inputs match the reviewed candidate on exact current `main`. The
+  founder-reviewed `release-identity` environment supplies the release App
+  identity. The App creates one annotated `vX.Y.Z` tag and pushes that ref.
+  It doesn't push a version commit or update `main`.
+- **`pypi-publish`** runs only for the exact candidate tag. It rechecks the
+  archives and uploads with PyPI Trusted Publishing in the protected `pypi`
+  environment. There is no API-token path.
+- **`mcp-registry-publish`** waits for the new version
   to be live on PyPI (the registry validates package existence), then
-  `mcp-publisher login github-oidc` + `mcp-publisher publish` — no token,
+  runs `mcp-publisher login github-oidc` and `mcp-publisher publish` in the
+  protected `mcp-registry` environment. It needs no repository token
   because the repo lives under the `OpenAdaptAI` org that owns the
   `io.github.OpenAdaptAI` namespace. The workflow downloads a fixed
   `mcp-publisher` version and verifies its SHA-256 before execution.
@@ -127,37 +131,33 @@ release sequence, or Production channel selector. PyPI `latest` and MCP
 The active, signed ledger in `OpenAdaptAI/.github` is the sole Production
 authority and requires its separate acceptance evidence and activation.
 
-To cut a release: bump the synchronized version fields (see §3.1), merge, then
-`git tag vX.Y.Z && git push origin vX.Y.Z` (or publish a Release with that
-tag). The first tag you push IS the first real publish — do it
-deliberately.
+To cut a release, update the synchronized version fields, `CHANGELOG.md`, and
+`release-candidate.json` in one reviewed change. Merge it. Then open the
+`Release` workflow on `main` and enter the exact version and full current-main
+commit. The protected job checks that `main` hasn't advanced before it creates
+the tag.
+
+If publication fails after the tag exists, rerun the failed job in that exact
+tag workflow run. Don't create a recovery tag or branch.
 
 ### 3.a Required repo configuration and secrets (FOUNDER, one-time)
 
-**In the OIDC path (recommended) there are ZERO repo secrets.** You must
-do this one-time setup before the first tag:
+Complete this setup before the first App-created tag:
 
-1. **PyPI Trusted Publishing** — on https://pypi.org, keep the publisher for
+1. **Release App identity.** Install the `openadapt-release` GitHub App on the
+   reviewed public repository set. Give it `Contents: write`; don't give it
+   another write permission. Add `OPENADAPT_RELEASE_APP_ID` as an environment
+   variable and `OPENADAPT_RELEASE_APP_PRIVATE_KEY` as an environment secret
+   in `release-identity`. Restrict that environment to `main` and require the
+   founder's review.
+2. **PyPI Trusted Publishing.** On https://pypi.org, keep the publisher for
    project `openadapt-agent` configured as:
    owner `OpenAdaptAI`, repo `openadapt-agent`, workflow `release.yml`,
    environment `pypi`. (PyPI account with 2FA required; the project is
    created on first OIDC upload.)
-2. **GitHub environment `pypi`** — create it in repo Settings ->
-   Environments. Optionally add required reviewers so each publish waits
-   for a human click.
-3. **MCP registry** — nothing. `io.github.OpenAdaptAI/*` is authorized by
-   the repo's own GitHub OIDC identity.
-
-**Optional token fallbacks** (only if you deliberately opt out of OIDC):
-
-| If you set repo variable... | ...you MUST set repo secret | Used for |
-| --- | --- | --- |
-| `PYPI_PUBLISH_METHOD = token` | `PYPI_API_TOKEN` | PyPI upload via API token |
-| `MCP_PUBLISH_METHOD = token` | `MCP_GITHUB_TOKEN` (PAT, `read:org`+`read:user`) | MCP registry `login github --token` |
-
-The workflow **fails loud, naming the missing secret**, if a token method
-is selected but its secret is absent — it never silently skips a publish.
-No secret is ever committed; these live only in repo Settings -> Secrets.
+3. **Publication environments.** Restrict `pypi` and `mcp-registry` to `v*`
+   tags. Both jobs use OIDC. `io.github.OpenAdaptAI/*` is authorized by the
+   repository's MCP registry identity.
 
 ### 3.1 Decide the release version
 
@@ -167,33 +167,34 @@ module, registry, and MCPB metadata versions synchronized.
 Set every future version in **four files that a CI test pins together**:
 `pyproject.toml` `version`, `src/openadapt_agent/__init__.py` `__version__`,
 both `version` fields in `server.json`, and `manifest.json` `version`. The
-`tests/test_distribution.py` guard fails if they drift.
+`tests/test_distribution.py` guard fails if they drift. Add one exact version
+heading to `CHANGELOG.md`, then update the tag, previous tag, and changelog
+binding in `release-candidate.json`.
 
-### 3.2 Publish to PyPI — AUTOMATED (`pypi-publish` job)
+### 3.2 Publish to PyPI (`pypi-publish` job)
 
-Fires automatically on a `vX.Y.Z` tag / Release once §3.a step 1-2 are
-done. To reproduce locally (dry run or a manual emergency publish):
+This job runs for the exact reviewed tag after the `pypi` environment allows
+it. You can reproduce its build and checks locally without publishing:
 
 ```bash
 python -m build                             # sdist + wheel into dist/
 python scripts/check_release_artifacts.py   # license/boundary gate
 twine check dist/*
-# twine upload dist/*   # emergency manual path only; prefer the tag flow
 ```
 
 Verify after a release: `pip index versions openadapt-agent` shows the new
 version and `uvx openadapt-agent@<version> --version` prints it.
 
-### 3.3 Submit to the official MCP registry — AUTOMATED (`mcp-registry-publish` job)
+### 3.3 Submit to the official MCP registry (`mcp-registry-publish` job)
 
-Fires automatically after the PyPI job, using `mcp-publisher login
-github-oidc` (no secret; the `OpenAdaptAI` org owns the namespace). The
+This job runs after PyPI, using `mcp-publisher login github-oidc`. The
 job waits for the PyPI version to be installable first, because the
-registry validates package existence. Local equivalent:
+registry validates package existence. For a local descriptor check, use the
+publisher's interactive GitHub login:
 
 ```bash
-mcp-publisher login github-oidc     # or: login github (interactive OAuth)
-mcp-publisher publish               # reads ./server.json
+mcp-publisher login github    # interactive OAuth
+mcp-publisher publish         # reads ./server.json
 ```
 
 If the registry asks you to prove the PyPI package belongs to this server,
