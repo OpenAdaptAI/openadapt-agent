@@ -39,7 +39,7 @@
         "policy_sha256": {"$ref": "#/$defs/digest"},
         "policy_revision": {"type": "integer", "minimum": 1},
         "target": {"const": "agent"},
-        "claim_scope": {"const": "qualified_agent_bridge_release"}
+        "claim_scope": {"const": "production_agent"}
       }
     },
     "release": {"$ref": "#/$defs/release"},

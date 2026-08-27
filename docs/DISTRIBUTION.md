@@ -75,46 +75,68 @@ and [`../manifest.json`](../manifest.json).
 
 ## 3. Release automation vs. founder one-time actions
 
-The build-and-publish pipeline lives in
-[`.github/workflows/release.yml`](../.github/workflows/release.yml). The
-founder reviews one exact protected-main commit before the release App creates
-its annotated tag. That tag starts the separate PyPI and MCP registry jobs.
-The App can't push a commit to `main`.
+The pipeline has separate preparation, staging, and publication workflows.
+[`prepare-release.yml`](../.github/workflows/prepare-release.yml) builds the
+package once. [`stage-release.yml`](../.github/workflows/stage-release.yml)
+copies those exact bytes into an App-authored draft GitHub Release. It also
+records the draft assets, the immutable-release response, and both live tag
+rulesets. It also proves that the prospective tag does not exist before draft
+creation and after every staged asset is complete. The staging record binds the
+second observation and its domain-separated digest. The central authority
+binds that closed record into an active signed
+`qualification-release` admission. Only then can
+[`release.yml`](../.github/workflows/release.yml) create the annotated tag and
+publish the admitted bytes. The App can't push a commit to `main`.
 
 ### 3.0 What the workflow does
 
 | Trigger | Jobs that run | Publishes? |
 | --- | --- | --- |
-| Pull request touching release files | `validate` | No. This is a dry run. |
-| Manual dispatch on exact current `main` | `validate`, then founder review in `release-identity`, then `create-release-tag` | No package publish. The App creates only the annotated tag. |
-| Push of the exact reviewed annotated tag | `validate` -> `bind-release-artifacts` -> `pypi-publish` -> `mcp-registry-publish` -> `registry-parity` | Yes, after the exact files are attested and the two protected publication environments approve them. |
+| Pull request touching release files | Candidate build and checks | No. This is a dry run. |
+| Manual `Prepare release candidate` dispatch on exact current `main` | Build, archive checks, artifact inventory, optional MCPB check | No. It retains the exact candidate for admission review. |
+| Manual `Stage release candidate for qualification` dispatch on `main` | Verify the candidate run, create or resume the App draft, upload and download both archives, record live release policy | No. It creates the durable qualification input. |
+| Manual `Publish admitted package` dispatch on `main` | Admission verification, tag creation, attestation, PyPI, MCP registry, parity, immutable GitHub Release | Yes. Each effect gets a new admission check after its protected environment opens. |
 
-- **`validate`** builds the sdist+wheel and local MCPB, runs
+- **Candidate preparation** builds the sdist and wheel once, then runs
   [`scripts/check_release_artifacts.py`](../scripts/check_release_artifacts.py)
   (fails if a wheel or sdist carries a bundle, `.enc`, run outputs, keys, or
   any non-code payload), checks the MCPB for
   workflow/evidence payloads, runs `twine check`, validates `server.json`
   against the exact MCP schema at the pinned `2025-12-11` URL and SHA-256
   `3fba09590c99f61735d234822279f4223fab9e300c0a81e81c91ab62a4114de0`,
-  and runs the
-  version-consistency guard (`tests/test_distribution.py`). It runs on PRs
-  and manual dispatch so the pipeline is testable **without** publishing.
+  and runs the version-consistency guard (`tests/test_distribution.py`). It
+  writes a closed inventory for the exact archive names, sizes, media types,
+  and SHA-256 digests. It runs on PRs and manual dispatch, so the complete
+  candidate gate is testable without publishing.
   An unavailable schema or changed schema bytes fail validation before any
   publisher can run.
-- **`bind-release-artifacts`** attests the exact wheel and source archive before
-  a publisher can use them. The workflow keeps the checked files for 30 days,
-  which is also the recovery window for that tag run.
-- **`create-release-tag`** runs only after the manual version and full commit
-  inputs match the reviewed candidate on exact current `main`. The
-  founder-reviewed `release-identity` environment supplies the release App
-  identity. The App creates one annotated `vX.Y.Z` tag and pushes that ref.
-  It doesn't push a version commit or update `main`.
-- **`pypi-publish`** runs only for the exact candidate tag. Before an upload,
-  it compares every existing file with the attested build. It refuses an
+- **Durable staging** uses the founder-reviewed `release-identity`
+  environment. The request must come from configured launch dispatcher
+  `abrichr` with actor ID `774615`. The workflow mints a token for App
+  `4730708`, verifies installation `156835568` and bot user `321543906`, then
+  creates or resumes one exact draft GitHub Release. It uploads missing assets
+  only after it checks every existing asset. A foreign uploader, changed byte,
+  extra name, or incomplete policy stops the run. The workflow downloads both
+  assets again and writes the closed staging record used for qualification.
+- **Admission verification and tag creation** start from the durable draft,
+  not an Actions artifact from the earlier candidate run. The publication
+  workflow downloads the draft assets and recreates their inventory. It calls
+  the central verifier at one exact commit. That verifier checks the signed
+  object pair, registry entries, authority and revocation state, time window,
+  source identity, draft identity, and every artifact byte. The workflow runs
+  the same pinned verifier again after the protected environment opens and
+  immediately before tag creation. The App then creates the annotated
+  `vX.Y.Z` tag. Its canonical message binds the admission reference and the
+  artifact inventory digest.
+- **Artifact attestation** binds the admitted wheel and source archive before a
+  publisher can use them. It gets its own current admission check first.
+- **PyPI publication** compares every existing file with the admitted bytes.
+  Before an upload, it compares every existing file with the staged build. It refuses an
   unexpected name, digest, size, URL, yank state, or byte sequence. A retry can
   upload a missing file from a partial release, but it can't replace or accept
   a conflicting file. PyPI Trusted Publishing runs in the protected `pypi`
-  environment. There is no API-token path.
+  environment. The workflow rechecks the admission immediately before the
+  publisher runs. There is no API-token path.
 - **`mcp-registry-publish`** first proves that PyPI has the complete exact file
   set. It compares an existing MCP version with the reviewed `server.json` and
   skips an exact prior publication. If the version is absent, it runs
@@ -122,33 +144,37 @@ The App can't push a commit to `main`.
   `mcp-registry` environment. It needs no repository token because the repo
   lives under the `OpenAdaptAI` org that owns the `io.github.OpenAdaptAI`
   namespace. The workflow downloads a fixed `mcp-publisher` version and
-  verifies its SHA-256 before execution.
-- **Registry parity and admission input** run after both publishes. The
+  verifies its SHA-256 before execution. It authenticates first, then rechecks
+  the admission immediately before `mcp-publisher publish`.
+- **Registry parity** runs after both publishes. The
   workflow downloads each PyPI artifact and proves byte-for-byte equality
   with the archives produced by the protected build. It also proves that the
   exact and `latest` MCP registry records equal the reviewed `server.json`.
-  Only then does it retain a 30-day
-  `production-admission-candidate-<version>` artifact. That record binds the
-  source commit, artifact hashes, both public registry observations, and one
-  exact commit of the canonical lifecycle policy.
-
-The retained record is explicitly `not_admitted`. It has no admission ID,
-release sequence, or Production channel selector. PyPI `latest` and MCP
-`latest` are distribution checks only. They never grant Production status.
-The active, signed ledger in `OpenAdaptAI/.github` is the sole Production
-authority and requires its separate acceptance evidence and activation.
+  The App publishes and seals the staged GitHub Release only after those checks
+  pass and one final admission check succeeds. PyPI `latest` and MCP `latest`
+  remain distribution checks. They never grant Production status. The active
+  signed admission in `OpenAdaptAI/.github` is the Production authority.
 
 To cut a release, update the synchronized version fields, `CHANGELOG.md`, and
-`release-candidate.json` in one reviewed change. Merge it. Then open the
-`Release` workflow on `main` and enter the exact version and full current-main
-commit. The protected job checks that `main` hasn't advanced before it creates
-the tag.
+`release-candidate.json` in one reviewed change. Merge it. Run `Prepare release
+candidate` with the exact version and current `main` commit. Submit its artifact
+name and run ID to `Stage release candidate for qualification`. Submit the
+resulting artifact inventory, publication staging record, and acceptance
+evidence to the central admission issuer. After the signed admission exists,
+run `Publish admitted package` with the exact version, source commit, and compact
+admission reference.
 
-If publication fails after the tag exists, rerun the failed jobs in that exact
-tag workflow run within 30 days. The rerun uses the original checked files. It
-checks public state before another upload and refuses any conflicting PyPI or
-MCP record. Don't rerun every job, create another tag, or create a recovery
-branch. Start a new reviewed release after the 30-day artifact window expires.
+If staging fails, dispatch the same staging request again. The workflow checks
+the existing draft and uploads only a missing exact asset. The candidate Actions
+artifact is needed only until the draft is complete.
+
+If publication fails, dispatch the same admitted release again. The complete
+App-authored draft is the durable recovery source before and after tag creation.
+The workflow downloads and verifies those bytes, so publication recovery does
+not depend on Actions artifact retention and never rebuilds the package. It
+accepts an exact PyPI subset and uploads only a missing file. It refuses a
+conflicting tag, draft asset, PyPI file, MCP record, or admission. Don't create
+a recovery tag or branch.
 
 ### 3.a Required repo configuration and secrets (FOUNDER, one-time)
 
@@ -159,23 +185,38 @@ Complete this setup before the first App-created tag:
    `Contents: write`, and `Metadata: read`. Set
    `OPENADAPT_RELEASE_APP_ID=4730708`,
    `OPENADAPT_RELEASE_ACTOR_ID=321543906`, and
-   `OPENADAPT_RELEASE_APP_INSTALLATION_ID=156835568`. Add
+   `OPENADAPT_RELEASE_APP_INSTALLATION_ID=156835568`. Set
+   `OPENADAPT_RELEASE_DISPATCHER_ACTOR_ID=774615`. Add
    `OPENADAPT_RELEASE_APP_PRIVATE_KEY` as an environment secret in
    `release-identity`. Allow exact `main` and protected `v*` tag runs in that
-   environment, and require the founder's review. The workflow checks the App,
-   actor, and minted installation IDs before it changes a tag or publishes.
+   environment, and require the founder's review. The workflow checks the human
+   requester and the separate App effect identity before it stages an asset,
+   changes a tag, or publishes a GitHub Release.
 2. **PyPI Trusted Publishing.** On https://pypi.org, keep the publisher for
    project `openadapt-agent` configured as:
    owner `OpenAdaptAI`, repo `openadapt-agent`, workflow `release.yml`,
    environment `pypi`. (PyPI account with 2FA required; the project is
    created on first OIDC upload.)
-3. **Publication environments.** Restrict `pypi` and `mcp-registry` to `v*`
-   tags. Both jobs use OIDC. `io.github.OpenAdaptAI/*` is authorized by the
-   repository's MCP registry identity.
+3. **Publication environments.** Restrict `pypi` and `mcp-registry` to the
+   admitted `release.yml` workflow on `main`. Both jobs use OIDC.
+   `io.github.OpenAdaptAI/*` is authorized by the repository's MCP registry
+   identity.
 4. **Immutable releases.** Enable GitHub immutable releases for
    `OpenAdaptAI/openadapt-agent`. The workflow reads the repository setting
-   before tag creation and again before publication. Any value other than
-   `enabled: true` stops the release.
+   before draft staging, tag creation, and final publication. It accepts the
+   exact two-field response only: `enabled` must be `true`, while
+   `enforced_by_owner` can be either boolean value. The staging record binds the
+   canonical response and its domain-separated SHA-256 digest.
+5. **Tag rulesets.** Create the two active organization rulesets named
+   `OpenAdapt policy: release tag creation` and `OpenAdapt policy: immutable
+   release tags`. Both target only `refs/tags/v*`. The creation ruleset permits
+   one Integration bypass for App `4730708`. The immutability ruleset has no
+   bypass and blocks update, deletion, and non-fast-forward changes. The
+   workflow resolves and verifies both exact rulesets before it creates a tag.
+6. **Central verifier.** Keep the reusable `qualification-release` verifier
+   pinned to its exact merged commit in `OpenAdaptAI/.github`. A floating branch
+   or tag is not an admission authority. Each publication job checks out that
+   same commit and runs the same verifier after its environment approval.
 
 ### 3.1 Decide the release version
 

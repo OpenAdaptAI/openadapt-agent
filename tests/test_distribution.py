@@ -23,6 +23,11 @@ LLMS_TXT = REPO_ROOT / "llms.txt"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 README = REPO_ROOT / "README.md"
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
+PREPARE_RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "prepare-release.yml"
+STAGE_RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "stage-release.yml"
+FRESH_ADMISSION_ACTION = (
+    REPO_ROOT / ".github" / "actions" / "verify-release-admission" / "action.yml"
+)
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 
 # `uses: owner/repo@<revision>` with the trailing ` # vX.Y.Z` comment stripped.
@@ -80,22 +85,28 @@ def test_pypi_readme_proves_mcp_namespace_ownership() -> None:
 
 def test_release_workflow_runs_the_complete_archive_boundary() -> None:
     """The exact artifacts handed to publishers get both release guards."""
-    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    assert '- "scripts/check_dist.py"' in workflow
-    assert "python scripts/check_release_artifacts.py dist" in workflow
-    assert "python scripts/check_dist.py dist/*" in workflow
-    assert "python scripts/check_source_boundary.py --require-dist" in workflow
+    prepare = PREPARE_RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    stage = STAGE_RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    assert '- "scripts/check_dist.py"' in prepare
+    for workflow in (prepare, stage, release):
+        assert "python scripts/check_release_artifacts.py dist" in workflow
+        assert "python scripts/check_dist.py dist/*" in workflow
+        assert "python scripts/check_source_boundary.py --require-dist" in workflow
 
 
-def test_release_tag_publication_accepts_only_the_release_app() -> None:
-    """A user-created tag must not reach either protected publisher."""
+def test_release_separates_the_human_requester_from_app_effects() -> None:
+    """The reviewed human requests a release; only the scoped App changes refs."""
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    assert '[ "${GITHUB_ACTOR}" != "openadapt-release[bot]" ]' in workflow
-    assert 'vars.OPENADAPT_RELEASE_ACTOR_ID' in workflow
-    assert '[ "${GITHUB_ACTOR_ID}" != "${RELEASE_APP_ACTOR_ID}" ]' in workflow
-    assert '[ "${{ vars.OPENADAPT_RELEASE_ACTOR_ID }}" != "${RELEASE_APP_ACTOR_ID}" ]' in workflow
+    assert 'RELEASE_DISPATCHER_ACTOR_ID: "774615"' in workflow
+    assert "vars.OPENADAPT_RELEASE_DISPATCHER_ACTOR_ID" in workflow
     assert 'EVENT_ACTOR_ID: ${{ github.actor_id }}' in workflow
-    assert 'test "${EVENT_ACTOR_ID}" = "${RELEASE_APP_ACTOR_ID}"' in workflow
+    assert 'test "${EVENT_ACTOR_ID}" = "${RELEASE_DISPATCHER_ACTOR_ID}"' in workflow
+    assert "environment: release-identity" in workflow
+    assert "actions/create-github-app-token@" in workflow
+    assert 'TOKEN_INSTALLATION_ID: ${{ steps.release-app.outputs[\'installation-id\'] }}' in workflow
+    assert 'test "${TOKEN_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"' in workflow
+    assert "RELEASE_APP_TOKEN: ${{ steps.release-app.outputs.token }}" in workflow
     assert "GITHUB_TRIGGERING_ACTOR" not in workflow
 
 
@@ -122,7 +133,8 @@ def test_every_workflow_action_is_pinned_to_a_commit() -> None:
     """
     unpinned: list[str] = []
     uncommented: list[str] = []
-    for workflow_file in sorted(WORKFLOWS_DIR.glob("*.yml")):
+    action_files = [FRESH_ADMISSION_ACTION]
+    for workflow_file in [*sorted(WORKFLOWS_DIR.glob("*.yml")), *action_files]:
         text = workflow_file.read_text(encoding="utf-8")
         for line in text.splitlines():
             match = USES_REVISION.match(line)

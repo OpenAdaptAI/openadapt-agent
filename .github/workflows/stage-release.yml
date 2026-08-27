@@ -1,0 +1,408 @@
+name: Stage release candidate for qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact reviewed package version
+        required: true
+        type: string
+      source_commit:
+        description: Full protected-main source commit SHA
+        required: true
+        type: string
+      candidate_run_id:
+        description: Successful prepare-release workflow run ID
+        required: true
+        type: string
+      candidate_artifact_name:
+        description: Exact dist-version-commit artifact name
+        required: true
+        type: string
+
+concurrency:
+  group: stage-release-${{ inputs.version }}-${{ inputs.source_commit }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_APP_ID: "4730708"
+  RELEASE_APP_ACTOR_ID: "321543906"
+  RELEASE_APP_INSTALLATION_ID: "156835568"
+  RELEASE_DISPATCHER_ACTOR_ID: "774615"
+  REPOSITORY_ID: "1136136670"
+
+jobs:
+  authorize-request:
+    name: Authorize the staging requester
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require the configured human launch dispatcher
+        env:
+          CONFIGURED_DISPATCHER_ID: ${{ vars.OPENADAPT_RELEASE_DISPATCHER_ACTOR_ID }}
+          EVENT_ACTOR_ID: ${{ github.actor_id }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_EVENT_NAME}" = "workflow_dispatch"
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${GITHUB_REPOSITORY}" = "OpenAdaptAI/openadapt-agent"
+          test "${CONFIGURED_DISPATCHER_ID}" = "${RELEASE_DISPATCHER_ACTOR_ID}"
+          test "${EVENT_ACTOR_ID}" = "${RELEASE_DISPATCHER_ACTOR_ID}"
+
+  stage:
+    name: Create or verify the App-authored recovery draft
+    needs: authorize-request
+    runs-on: ubuntu-latest
+    environment: release-identity
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout the exact candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bind the candidate to protected main
+        id: candidate
+        env:
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${REQUESTED_SOURCE_COMMIT}"
+          git fetch --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main"
+          git merge-base --is-ancestor \
+            "${REQUESTED_SOURCE_COMMIT}" refs/remotes/origin/main
+          python scripts/verify_release_candidate.py \
+            --event-name workflow_dispatch \
+            --ref refs/heads/main \
+            --source-commit "${REQUESTED_SOURCE_COMMIT}" \
+            --requested-version "${REQUESTED_VERSION}" \
+            --requested-source-commit "${REQUESTED_SOURCE_COMMIT}" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Bind and verify the prior candidate run
+        id: handoff
+        env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_ARTIFACT_NAME: ${{ inputs.candidate_artifact_name }}
+        run: |
+          set -euo pipefail
+          case "${CANDIDATE_RUN_ID}" in
+            ''|*[!0-9]*)
+              echo "::error::The candidate run ID must be numeric." >&2
+              exit 1
+              ;;
+          esac
+          expected_artifact="dist-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}"
+          test "${REQUESTED_ARTIFACT_NAME}" = "${expected_artifact}"
+          run="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}")"
+          test "$(jq -r '.id | tostring' <<< "${run}")" = "${CANDIDATE_RUN_ID}"
+          test "$(jq -r '.repository.id | tostring' <<< "${run}")" = "${REPOSITORY_ID}"
+          test "$(jq -r '.head_repository.id | tostring' <<< "${run}")" = "${REPOSITORY_ID}"
+          test "$(jq -r '.path' <<< "${run}")" = ".github/workflows/prepare-release.yml"
+          test "$(jq -r '.event' <<< "${run}")" = "workflow_dispatch"
+          test "$(jq -r '.head_branch' <<< "${run}")" = "main"
+          test "$(jq -r '.head_sha' <<< "${run}")" = "${{ steps.candidate.outputs.source_commit }}"
+          test "$(jq -r '.conclusion' <<< "${run}")" = "success"
+          echo "candidate_artifact_name=${expected_artifact}" >> "${GITHUB_OUTPUT}"
+          echo "metadata_artifact_name=release-candidate-metadata-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download the exact checked distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.handoff.outputs.candidate_artifact_name }}
+          path: dist/
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download the exact candidate inventory
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.handoff.outputs.metadata_artifact_name }}
+          path: release-metadata/
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Recheck the candidate bytes before staging
+        run: |
+          set -euo pipefail
+          python scripts/check_release_artifacts.py dist
+          python scripts/check_dist.py dist/*
+          python scripts/check_source_boundary.py --require-dist
+          python scripts/prepare_release_artifacts.py verify-inventory \
+            --dist dist \
+            --inventory release-metadata/artifact-inventory.json
+
+      - name: Mint the repository-scoped release App token
+        id: release-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.OPENADAPT_RELEASE_APP_ID }}
+          private-key: ${{ secrets.OPENADAPT_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: openadapt-agent
+          permission-administration: read
+          permission-contents: write
+          permission-metadata: read
+
+      - name: Verify the release App and live release policy
+        id: authority
+        env:
+          CONFIGURED_APP_ID: ${{ vars.OPENADAPT_RELEASE_APP_ID }}
+          CONFIGURED_ACTOR_ID: ${{ vars.OPENADAPT_RELEASE_ACTOR_ID }}
+          CONFIGURED_INSTALLATION_ID: ${{ vars.OPENADAPT_RELEASE_APP_INSTALLATION_ID }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          TOKEN_INSTALLATION_ID: ${{ steps.release-app.outputs['installation-id'] }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.release-app.outputs.app-slug }}" = "openadapt-release"
+          test "${CONFIGURED_APP_ID}" = "${RELEASE_APP_ID}"
+          test "${CONFIGURED_ACTOR_ID}" = "${RELEASE_APP_ACTOR_ID}"
+          test "${CONFIGURED_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
+          test "${TOKEN_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
+          installation="$(gh api /installation)"
+          test "$(jq -r '.app_id | tostring' <<< "${installation}")" = "${RELEASE_APP_ID}"
+          test "$(jq -r '.id | tostring' <<< "${installation}")" = "${RELEASE_APP_INSTALLATION_ID}"
+          test "$(jq -r '.permissions.administration' <<< "${installation}")" = "read"
+          test "$(jq -r '.permissions.contents' <<< "${installation}")" = "write"
+          test "$(jq -r '.permissions.metadata' <<< "${installation}")" = "read"
+          repositories="$(gh api /installation/repositories)"
+          test "$(jq -r '.total_count' <<< "${repositories}")" -eq 1
+          test "$(jq -r '.repositories[0].id | tostring' <<< "${repositories}")" = "${REPOSITORY_ID}"
+          test "$(gh api '/users/openadapt-release%5Bbot%5D' --jq '.id | tostring')" = "${RELEASE_APP_ACTOR_ID}"
+
+          gh api "/repos/${GITHUB_REPOSITORY}/immutable-releases" \
+            --header 'X-GitHub-Api-Version: 2026-03-10' \
+            > "${RUNNER_TEMP}/immutable-releases.json"
+          jq -e '
+            (keys == ["enabled","enforced_by_owner"]) and
+            .enabled == true and
+            (.enforced_by_owner | type) == "boolean"
+          ' "${RUNNER_TEMP}/immutable-releases.json" >/dev/null
+          rulesets="$(gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/rulesets?per_page=100" | jq -c '[.[][]]')"
+          test "$(jq '[.[] | select(.name == "OpenAdapt policy: release tag creation")] | length' <<< "${rulesets}")" -eq 1
+          test "$(jq '[.[] | select(.name == "OpenAdapt policy: immutable release tags")] | length' <<< "${rulesets}")" -eq 1
+          creation_id="$(jq -r '.[] | select(.name == "OpenAdapt policy: release tag creation") | .id' <<< "${rulesets}")"
+          immutable_id="$(jq -r '.[] | select(.name == "OpenAdapt policy: immutable release tags") | .id' <<< "${rulesets}")"
+          gh api "/repos/${GITHUB_REPOSITORY}/rulesets/${creation_id}" \
+            > "${RUNNER_TEMP}/creation-ruleset.json"
+          gh api "/repos/${GITHUB_REPOSITORY}/rulesets/${immutable_id}" \
+            > "${RUNNER_TEMP}/immutability-ruleset.json"
+          jq -e --argjson app_id "${RELEASE_APP_ID}" '
+            .name == "OpenAdapt policy: release tag creation" and
+            .target == "tag" and .enforcement == "active" and
+            .conditions.ref_name.include == ["refs/tags/v*"] and
+            .conditions.ref_name.exclude == [] and
+            .rules == [{"type":"creation"}] and
+            .bypass_actors == [{"actor_id":$app_id,"actor_type":"Integration","bypass_mode":"always"}]
+          ' "${RUNNER_TEMP}/creation-ruleset.json" >/dev/null
+          jq -e '
+            .name == "OpenAdapt policy: immutable release tags" and
+            .target == "tag" and .enforcement == "active" and
+            .conditions.ref_name.include == ["refs/tags/v*"] and
+            .conditions.ref_name.exclude == [] and
+            .bypass_actors == [] and
+            (.rules | sort_by(.type)) == [
+              {"type":"deletion"},
+              {"type":"non_fast_forward"},
+              {"type":"update","parameters":{"update_allows_fetch_and_merge":false}}
+            ]
+          ' "${RUNNER_TEMP}/immutability-ruleset.json" >/dev/null
+
+      - name: Create or resume the exact App-authored draft
+        id: stage
+        env:
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.candidate.outputs.version }}
+          SOURCE_COMMIT: ${{ steps.candidate.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null
+          tag_status=$?
+          set -e
+          if [ "${tag_status}" -eq 0 ]; then
+            echo "::error::The release tag exists before qualification." >&2
+            exit 1
+          elif [ "${tag_status}" -ne 2 ]; then
+            echo "::error::Could not inspect the release tag before staging." >&2
+            exit 1
+          fi
+
+          gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            > "${RUNNER_TEMP}/release-pages.json"
+          jq --arg tag "${RELEASE_TAG}" '[.[][] | select(.tag_name == $tag)]' \
+            "${RUNNER_TEMP}/release-pages.json" > "${RUNNER_TEMP}/matching-releases.json"
+          match_count="$(jq 'length' "${RUNNER_TEMP}/matching-releases.json")"
+          if [ "${match_count}" -eq 0 ]; then
+            jq -n \
+              --arg tag "${RELEASE_TAG}" \
+              --arg commit "${SOURCE_COMMIT}" \
+              --arg name "OpenAdapt Agent ${RELEASE_VERSION}" \
+              --arg body "This candidate is staged for qualification. Publication requires its exact signed release admission." \
+              '{tag_name:$tag,target_commitish:$commit,name:$name,body:$body,draft:true,prerelease:false,generate_release_notes:false,make_latest:"false"}' \
+              > "${RUNNER_TEMP}/create-release.json"
+            gh api --method POST "/repos/${GITHUB_REPOSITORY}/releases" \
+              --input "${RUNNER_TEMP}/create-release.json" \
+              > "${RUNNER_TEMP}/release.json"
+          elif [ "${match_count}" -eq 1 ]; then
+            jq '.[0]' "${RUNNER_TEMP}/matching-releases.json" > "${RUNNER_TEMP}/release.json"
+          else
+            echo "::error::More than one GitHub Release uses the candidate tag." >&2
+            exit 1
+          fi
+          test "$(jq -r '.draft' "${RUNNER_TEMP}/release.json")" = "true"
+          test "$(jq -r '.prerelease' "${RUNNER_TEMP}/release.json")" = "false"
+          test "$(jq -r '.tag_name' "${RUNNER_TEMP}/release.json")" = "${RELEASE_TAG}"
+          test "$(jq -r '.target_commitish' "${RUNNER_TEMP}/release.json")" = "${SOURCE_COMMIT}"
+          test "$(jq -r '.author.id | tostring' "${RUNNER_TEMP}/release.json")" = "${RELEASE_APP_ACTOR_ID}"
+          test "$(jq -r '.author.login' "${RUNNER_TEMP}/release.json")" = "openadapt-release[bot]"
+          release_id="$(jq -r '.id' "${RUNNER_TEMP}/release.json")"
+
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null
+          tag_status=$?
+          set -e
+          if [ "${tag_status}" -ne 2 ]; then
+            echo "::error::Draft staging created or found an unadmitted tag." >&2
+            exit 1
+          fi
+
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+            > "${RUNNER_TEMP}/assets.json"
+          test "$(jq '[.[].name] | unique | length' "${RUNNER_TEMP}/assets.json")" \
+            -eq "$(jq 'length' "${RUNNER_TEMP}/assets.json")"
+          test "$(jq --arg id "${RELEASE_APP_ACTOR_ID}" '[.[] | select((.uploader.id | tostring) != $id or .uploader.login != "openadapt-release[bot]")] | length' "${RUNNER_TEMP}/assets.json")" -eq 0
+          mkdir -p "${RUNNER_TEMP}/staged-dist"
+          while IFS=$'\t' read -r asset_id asset_name; do
+            [ -n "${asset_id}" ] || continue
+            case "${asset_name}" in
+              *[!A-Za-z0-9._+-]*|"")
+                echo "::error::The staged release has an unsafe asset name." >&2
+                exit 1
+                ;;
+            esac
+            gh api \
+              --header "Accept: application/octet-stream" \
+              "/repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "${RUNNER_TEMP}/staged-dist/${asset_name}"
+          done < <(jq -r '.[] | [.id, .name] | @tsv' "${RUNNER_TEMP}/assets.json")
+          python scripts/prepare_release_artifacts.py verify-subset \
+            --dist "${RUNNER_TEMP}/staged-dist" \
+            --inventory release-metadata/artifact-inventory.json
+          matched_asset_count="$(jq --slurpfile inventory release-metadata/artifact-inventory.json '
+            [
+              .[] as $asset |
+              $inventory[0].artifacts[] |
+              select(
+                .name == $asset.name and
+                .size_bytes == $asset.size and
+                .sha256 == $asset.digest and
+                .media_type == $asset.content_type and
+                $asset.state == "uploaded"
+              )
+            ] | length
+          ' "${RUNNER_TEMP}/assets.json")"
+          test "${matched_asset_count}" -eq "$(jq 'length' "${RUNNER_TEMP}/assets.json")"
+
+          while IFS= read -r asset_name; do
+            if [ ! -f "${RUNNER_TEMP}/staged-dist/${asset_name}" ]; then
+              media_type="$(jq -r --arg name "${asset_name}" '.artifacts[] | select(.name == $name) | .media_type' release-metadata/artifact-inventory.json)"
+              encoded_name="$(jq -rn --arg value "${asset_name}" '$value | @uri')"
+              gh api --method POST \
+                "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" \
+                --header "Content-Type: ${media_type}" \
+                --input "dist/${asset_name}" >/dev/null
+            fi
+          done < <(jq -r '.artifacts[].name' release-metadata/artifact-inventory.json)
+
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            > "${RUNNER_TEMP}/release.json"
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+            > "${RUNNER_TEMP}/assets.json"
+          mkdir -p "${RUNNER_TEMP}/verified-dist"
+          while IFS=$'\t' read -r asset_id asset_name; do
+            gh api \
+              --header "Accept: application/octet-stream" \
+              "/repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "${RUNNER_TEMP}/verified-dist/${asset_name}"
+          done < <(jq -r '.[] | [.id, .name] | @tsv' "${RUNNER_TEMP}/assets.json")
+          python scripts/prepare_release_artifacts.py verify-release-assets \
+            --inventory release-metadata/artifact-inventory.json \
+            --release "${RUNNER_TEMP}/release.json" \
+            --assets "${RUNNER_TEMP}/assets.json" \
+            --asset-root "${RUNNER_TEMP}/verified-dist" \
+            --expected-tag "${RELEASE_TAG}" \
+            --expected-source-commit "${SOURCE_COMMIT}" \
+            --require-state draft \
+            --github-output "${GITHUB_OUTPUT}"
+
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null
+          tag_status=$?
+          set -e
+          if [ "${tag_status}" -ne 2 ]; then
+            echo "::error::The release tag appeared before staging completed." >&2
+            exit 1
+          fi
+          jq -n --arg ref "refs/tags/${RELEASE_TAG}" \
+            '{ref:$ref,exists:false}' > "${RUNNER_TEMP}/tag-ref-state.json"
+
+      - name: Produce the closed publication staging evidence
+        id: evidence
+        env:
+          RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
+          SOURCE_COMMIT: ${{ steps.candidate.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          observed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python scripts/prepare_release_artifacts.py staging-evidence \
+            --inventory release-metadata/artifact-inventory.json \
+            --release "${RUNNER_TEMP}/release.json" \
+            --assets "${RUNNER_TEMP}/assets.json" \
+            --creation-ruleset "${RUNNER_TEMP}/creation-ruleset.json" \
+            --immutability-ruleset "${RUNNER_TEMP}/immutability-ruleset.json" \
+            --immutable-releases "${RUNNER_TEMP}/immutable-releases.json" \
+            --tag-ref-state "${RUNNER_TEMP}/tag-ref-state.json" \
+            --asset-root "${RUNNER_TEMP}/verified-dist" \
+            --expected-tag "${RELEASE_TAG}" \
+            --expected-source-commit "${SOURCE_COMMIT}" \
+            --observed-at "${observed_at}" \
+            --output release-metadata/publication-staging.json \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Upload the qualification input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qualification-release-staging-agent-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}
+          path: |
+            release-metadata/artifact-inventory.json
+            release-metadata/publication-staging.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Record the two release principals and exact staging IDs
+        env:
+          DRAFT_RELEASE_ID: ${{ steps.evidence.outputs.draft_release_id }}
+          PUBLICATION_STAGING_SHA256: ${{ steps.evidence.outputs.publication_staging_sha256 }}
+        run: |
+          {
+            echo "### Release staging authority"
+            echo ""
+            echo "- Requester: ${GITHUB_ACTOR} (${GITHUB_ACTOR_ID})"
+            echo "- Effect App: 4730708; installation: 156835568; bot user: 321543906"
+            echo "- Draft GitHub Release: ${DRAFT_RELEASE_ID}"
+            echo "- Publication staging: ${PUBLICATION_STAGING_SHA256}"
+          } >> "${GITHUB_STEP_SUMMARY}"

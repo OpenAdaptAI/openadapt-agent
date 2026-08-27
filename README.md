@@ -281,11 +281,16 @@ Machine-readable launch manifests live at the repo root:
 Registry-launched installs start **read-only by default**; execution
 tools are registered only when the operator adds `--allow-run`.
 
-Publishing is automated: [`.github/workflows/release.yml`](.github/workflows/release.yml)
-builds, runs the license/boundary gate, and — only on a `vX.Y.Z` tag or a
-published Release — ships to PyPI (Trusted Publishing, OIDC) and the MCP
-registry (`mcp-publisher login github-oidc`), secret-free. It runs a dry
-run (no publish) on PRs and manual dispatch. See
+Publishing uses three protected workflows. [`.github/workflows/prepare-release.yml`](.github/workflows/prepare-release.yml)
+builds and checks one exact candidate without publishing it.
+[`.github/workflows/stage-release.yml`](.github/workflows/stage-release.yml)
+copies those bytes into an App-authored draft GitHub Release and records the
+live immutable-release and tag-ruleset state. The central authority binds that
+staging record into the signed release admission. Only then can
+[`.github/workflows/release.yml`](.github/workflows/release.yml) create the
+admitted tag and publish the same draft bytes to PyPI, the MCP registry, and
+the final immutable GitHub Release. Pull requests run the candidate checks
+without publishing. See
 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) for the one-time founder
 setup.
 

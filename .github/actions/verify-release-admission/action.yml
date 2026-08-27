@@ -1,0 +1,114 @@
+name: Verify exact release admission
+description: Recheck the signed admission and local bytes at one publication boundary
+
+inputs:
+  admission_reference_json:
+    description: Compact qualification-release reference v2
+    required: true
+  artifact_inventory_json:
+    description: Compact closed Agent artifact inventory
+    required: true
+  artifact_root:
+    description: Directory containing the exact wheel and source archive
+    required: true
+  central_verifier_sha:
+    description: Exact merged OpenAdaptAI/.github verifier commit
+    required: true
+  expected_source_commit:
+    description: Exact admitted source commit
+    required: true
+  expected_version:
+    description: Exact admitted package version
+    required: true
+  expected_tag:
+    description: Exact admitted annotated tag
+    required: true
+
+outputs:
+  admission_object_sha256:
+    value: ${{ steps.verify.outputs.admission_object_sha256 }}
+  artifact_inventory_sha256:
+    value: ${{ steps.verify.outputs.artifact_inventory_sha256 }}
+  draft_release_id:
+    value: ${{ steps.verify.outputs.draft_release_id }}
+  publication_staging_json:
+    value: ${{ steps.verify.outputs.publication_staging_json }}
+  publication_staging_sha256:
+    value: ${{ steps.verify.outputs.publication_staging_sha256 }}
+  verified_at:
+    value: ${{ steps.verified-at.outputs.verified_at }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check out the exact central verifier
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: OpenAdaptAI/.github
+        ref: ${{ inputs.central_verifier_sha }}
+        path: central-release-trust
+        persist-credentials: false
+
+    - name: Verify the central verifier checkout
+      shell: bash
+      env:
+        CENTRAL_VERIFIER_SHA: ${{ inputs.central_verifier_sha }}
+      run: |
+        set -euo pipefail
+        [[ "${CENTRAL_VERIFIER_SHA}" =~ ^[0-9a-f]{40}$ ]]
+        test "$(git -C central-release-trust rev-parse HEAD)" = "${CENTRAL_VERIFIER_SHA}"
+
+    - name: Install the pinned GitHub attestation verifier
+      shell: bash
+      run: |
+        set -euo pipefail
+        archive="$RUNNER_TEMP/gh_2.98.0_linux_amd64.tar.gz"
+        curl --fail --location --silent --show-error \
+          --output "$archive" \
+          https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_linux_amd64.tar.gz
+        echo "3b8ac6b30336802fc1a858d7c084e11cdf24ac1a761ca90b68022d7d729208de  $archive" \
+          | sha256sum --check --strict
+        tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
+        echo "$RUNNER_TEMP/gh_2.98.0_linux_amd64/bin" >> "$GITHUB_PATH"
+
+    - name: Materialize the closed verifier inputs
+      id: inputs
+      shell: bash
+      env:
+        ADMISSION_REFERENCE_JSON: ${{ inputs.admission_reference_json }}
+        ARTIFACT_INVENTORY_JSON: ${{ inputs.artifact_inventory_json }}
+      run: |
+        set -euo pipefail
+        verification_root="$(mktemp -d "$RUNNER_TEMP/release-admission.XXXXXX")"
+        printf '%s' "$ADMISSION_REFERENCE_JSON" > "$verification_root/admission-reference.json"
+        printf '%s' "$ARTIFACT_INVENTORY_JSON" > "$verification_root/artifact-inventory.json"
+        echo "verification_root=$verification_root" >> "$GITHUB_OUTPUT"
+
+    - name: Verify the current admission and exact local bytes
+      id: verify
+      shell: bash
+      env:
+        ARTIFACT_ROOT: ${{ inputs.artifact_root }}
+        EXPECTED_SOURCE_COMMIT: ${{ inputs.expected_source_commit }}
+        EXPECTED_VERSION: ${{ inputs.expected_version }}
+        EXPECTED_TAG: ${{ inputs.expected_tag }}
+        GH_TOKEN: ${{ github.token }}
+        VERIFICATION_ROOT: ${{ steps.inputs.outputs.verification_root }}
+      run: |
+        set -euo pipefail
+        python3 central-release-trust/scripts/verify_production_release_admission.py \
+          --admission-reference "$VERIFICATION_ROOT/admission-reference.json" \
+          --artifact-inventory "$VERIFICATION_ROOT/artifact-inventory.json" \
+          --artifact-root "$ARTIFACT_ROOT" \
+          --expected-target agent \
+          --expected-repository OpenAdaptAI/openadapt-agent \
+          --expected-repository-id 1136136670 \
+          --expected-source-commit "$EXPECTED_SOURCE_COMMIT" \
+          --expected-version "$EXPECTED_VERSION" \
+          --expected-tag "$EXPECTED_TAG" \
+          --github-output "$GITHUB_OUTPUT"
+
+    - name: Record the fresh verification time
+      id: verified-at
+      shell: bash
+      run: echo "verified_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"

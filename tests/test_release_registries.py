@@ -14,6 +14,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+PREPARE_RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "prepare-release.yml"
+STAGE_RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "stage-release.yml"
+FRESH_ADMISSION_ACTION = (
+    ROOT / ".github" / "actions" / "verify-release-admission" / "action.yml"
+)
 CANDIDATE_SCHEMA = ROOT / "schemas" / "production-lifecycle-admission-candidate.schema.json"
 MCPB_IGNORE = ROOT / ".mcpbignore"
 RELEASE_CANDIDATE = ROOT / "release-candidate.json"
@@ -186,7 +191,7 @@ def _policy(tmp_path: Path) -> Path:
                         "id": "agent",
                         "source_repository": "OpenAdaptAI/openadapt-agent",
                         "release_kind": "public_package",
-                        "required_claim_scope": "qualified_agent_bridge_release",
+                        "required_claim_scope": "production_agent",
                         "required_artifact_kinds": ["sdist", "wheel"],
                         "package_index_project": "openadapt-agent",
                         "artifact_authority_by_kind": {
@@ -466,21 +471,27 @@ def test_candidate_binds_head_and_the_annotated_previous_tag() -> None:
         verify_repository_binding(candidate, "a" * 40)
 
 
-def test_release_orders_publish_parity_then_candidate_and_pins_publisher() -> None:
+def test_release_verifies_admission_before_effects_and_pins_publisher() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    publish = workflow.index("./mcp-publisher publish")
-    parity = workflow.index("Verify registry parity and write the unadmitted candidate")
-    retain = workflow.index("Upload the bounded admission-candidate handoff")
-    assert publish < parity < retain
-    assert "registry-parity:" in workflow
+    assert "verify-production-release-admission:" in workflow
+    assert "needs: [acquire-release-artifacts, verify-production-release-admission]" in workflow
     assert (
-        "needs: [validate, authorize-release-app, bind-release-artifacts, pypi-publish, "
-        "mcp-registry-publish]" in workflow
+        "needs: [acquire-release-artifacts, verify-production-release-admission, "
+        "create-or-verify-release-tag, bind-release-artifacts]" in workflow
     )
+    assert "registry-parity:" in workflow
+    assert "Verify byte parity and exact latest records" in workflow
+    assert "production-admission-candidate" not in workflow
     assert "releases/latest/download" not in workflow
     assert 'publisher_version="1.8.1"' in workflow
     assert "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc" in workflow
     assert "production-lifecycle-admissions.json" not in workflow
+    assert "central_verifier_sha: CENTRAL_VERIFIER_SHA" in workflow
+    assert workflow.count("uses: ./.github/actions/verify-release-admission") == 5
+    assert "Recheck admission immediately before tag creation" in workflow
+    assert "Recheck admission immediately before PyPI publication" in workflow
+    assert "Recheck admission immediately before MCP publication" in workflow
+    assert "Recheck admission immediately before final Release publication" in workflow
 
 
 def test_release_app_can_create_only_the_reviewed_annotated_tag() -> None:
@@ -499,14 +510,19 @@ def test_release_app_can_create_only_the_reviewed_annotated_tag() -> None:
     assert "permission-contents: write" in workflow
     assert "permission-administration: read" in workflow
     assert "permission-metadata: read" in workflow
-    assert 'git tag -a "${RELEASE_TAG}" "${EXPECTED_SOURCE_COMMIT}"' in workflow
+    assert 'git tag -a --cleanup=verbatim "${RELEASE_TAG}" "${SOURCE_COMMIT}"' in workflow
+    assert "openadapt.production-release-tag-binding/v1" not in workflow
+    assert "scripts/prepare_release_artifacts.py tag-binding" in workflow
     pushes = [line.strip() for line in workflow.splitlines() if "push origin" in line]
     assert pushes == ['git push origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"']
     assert "push origin HEAD" not in workflow
     assert "refs/heads/main:refs/heads/main" not in workflow
     assert "gh api /installation" in workflow
+    assert "OpenAdapt policy: release tag creation" in workflow
+    assert "OpenAdapt policy: immutable release tags" in workflow
     assert "immutable-releases" in workflow
-    assert "'.enabled'" in workflow
+    assert '(keys == ["enabled","enforced_by_owner"])' in workflow
+    assert '(.enforced_by_owner | type) == "boolean"' in workflow
 
 
 def test_publication_uses_separate_oidc_environments_without_token_fallbacks() -> None:
@@ -514,7 +530,7 @@ def test_publication_uses_separate_oidc_environments_without_token_fallbacks() -
 
     assert "environment: pypi" in workflow
     assert "environment: mcp-registry" in workflow
-    assert workflow.count("id-token: write") == 3
+    assert workflow.count("id-token: write") == 4
     assert "pypa/gh-action-pypi-publish@" in workflow
     assert "skip-existing: true" in workflow
     assert "./mcp-publisher login github-oidc" in workflow
@@ -531,27 +547,37 @@ def test_publication_uses_separate_oidc_environments_without_token_fallbacks() -
         assert forbidden not in workflow
 
 
-def test_tag_jobs_fail_closed_and_recovery_reuses_the_exact_tag_run() -> None:
+def test_recovery_uses_the_app_draft_and_never_rebuilds() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    publish_guard = (
-        "if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}"
-    )
+    prepare = PREPARE_RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    stage = STAGE_RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
-    assert workflow.count(publish_guard) == 5
+    assert "push:" not in workflow.split("concurrency:", 1)[0]
     assert "cancel-in-progress: false" in workflow
-    assert "The exact annotated release tag already exists. No ref changed." in workflow
-    assert "A release tag must be annotated." in workflow
-    assert '--event-name "${GITHUB_EVENT_NAME}"' in workflow
-    assert '--ref "${GITHUB_REF}"' in workflow
+    assert "Build the sdist and wheel once" in prepare
+    assert "python -m build" in prepare
+    assert "python -m build" not in workflow
+    assert "Create or resume the exact App-authored draft" in stage
+    assert "Draft staging created or found an unadmitted tag" in stage
+    assert "Acquire the exact durable draft bytes" in workflow
+    assert "candidate_run_id" not in workflow
+    assert "verify-tag-object" in workflow
+    assert "verify-inventory" in workflow
+    assert "OpenAdapt production release tag admission reference" not in workflow
     assert "GITHUB_TRIGGERING_ACTOR" not in workflow
     assert "Could not inspect the release tag" in workflow
-    assert "Could not verify that the release tag is absent" in workflow
-    assert workflow.count("retention-days: 30") >= 3
+    assert workflow.count("retention-days: 30") >= 2
     assert "Attest the exact wheel and source archive" in workflow
     assert "--inspect-publication" in workflow
     assert "--require-pypi-state complete" in workflow
     assert "--require-mcp-state complete" in workflow
     assert "recovery/" not in workflow
+    assert "python -m build" not in stage
+    assert "publication-staging.json" in stage
+    assert "qualification-release-staging-agent-" in stage
+    action = FRESH_ADMISSION_ACTION.read_text(encoding="utf-8")
+    assert "verify_production_release_admission.py" in action
+    assert "gh_2.98.0_linux_amd64.tar.gz" in action
 
 
 def test_unavailable_registry_schema_refuses_validation(tmp_path: Path) -> None:
@@ -572,7 +598,7 @@ def test_changed_registry_schema_bytes_refuse_validation(tmp_path: Path) -> None
 
 
 def test_release_validation_uses_the_fail_closed_schema_guard() -> None:
-    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    workflow = PREPARE_RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
     assert "python scripts/validate_server_schema.py --server-json server.json" in workflow
     assert "skipping live schema check" not in workflow

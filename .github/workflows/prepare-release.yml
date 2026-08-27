@@ -1,0 +1,170 @@
+name: Prepare release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact reviewed version on protected main
+        required: true
+        type: string
+      source_commit:
+        description: Full protected-main commit SHA to build once
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - "CHANGELOG.md"
+      - "release-candidate.json"
+      - "pyproject.toml"
+      - "server.json"
+      - "manifest.json"
+      - ".mcpbignore"
+      - "src/openadapt_agent/__init__.py"
+      - "src/openadapt_agent/mcpb_entry.py"
+      - "scripts/check_mcpb.py"
+      - "scripts/check_release_artifacts.py"
+      - "scripts/check_dist.py"
+      - "scripts/check_source_boundary.py"
+      - "scripts/prepare_release_artifacts.py"
+      - "scripts/validate_server_schema.py"
+      - "scripts/verify_release_candidate.py"
+      - "scripts/verify_release_registries.py"
+      - "schemas/production-lifecycle-admission-candidate.schema.json"
+      - "source-policy.public.json"
+      - "tests/test_distribution.py"
+      - "tests/test_release_artifact_handoff.py"
+      - "tests/test_release_registries.py"
+      - ".github/actions/verify-release-admission/action.yml"
+      - ".github/workflows/prepare-release.yml"
+      - ".github/workflows/stage-release.yml"
+      - ".github/workflows/release.yml"
+
+concurrency:
+  group: prepare-release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build once + validate (no publish)
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_inventory_json: ${{ steps.inventory.outputs.artifact_inventory_json }}
+      candidate_artifact_name: ${{ steps.names.outputs.candidate_artifact_name }}
+      metadata_artifact_name: ${{ steps.names.outputs.metadata_artifact_name }}
+      source_commit: ${{ steps.candidate.outputs.source_commit }}
+      tag: ${{ steps.candidate.outputs.tag }}
+      version: ${{ steps.candidate.outputs.version }}
+    steps:
+      - name: Checkout the exact event source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bind the event to the reviewed release candidate
+        id: candidate
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          source_commit="$(git rev-parse HEAD)"
+          args=(
+            --event-name "${GITHUB_EVENT_NAME}"
+            --ref "${GITHUB_REF}"
+            --source-commit "${source_commit}"
+            --github-output "${GITHUB_OUTPUT}"
+          )
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            git fetch --no-tags origin \
+              "+refs/heads/main:refs/remotes/origin/main"
+            remote_main="$(git rev-parse refs/remotes/origin/main)"
+            if [ "${GITHUB_REF}" != "refs/heads/main" ] || \
+               [ "${source_commit}" != "${GITHUB_SHA}" ] || \
+               [ "${source_commit}" != "${remote_main}" ]; then
+              echo "::error::The candidate source is not exact current main." >&2
+              exit 1
+            fi
+            args+=(
+              --requested-version "${REQUESTED_VERSION}"
+              --requested-source-commit "${REQUESTED_SOURCE_COMMIT}"
+            )
+          fi
+          python scripts/verify_release_candidate.py "${args[@]}"
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade build "twine>=6.1" "packaging>=24.2" jsonschema
+          python -m pip install -e ".[dev]"
+      - name: Run release contract tests
+        run: >-
+          python -m pytest
+          tests/test_distribution.py
+          tests/test_release_artifact_handoff.py
+          tests/test_release_registries.py
+          -q
+      - name: Build the sdist and wheel once
+        run: python -m build
+      - name: Check the exact release archives
+        run: |
+          python scripts/check_release_artifacts.py dist
+          python scripts/check_dist.py dist/*
+          python scripts/check_source_boundary.py --require-dist
+      - name: Check the package metadata
+        run: twine check dist/*
+      - name: Build the closed artifact inventory
+        id: inventory
+        run: |
+          python scripts/prepare_release_artifacts.py inventory \
+            --dist dist \
+            --output release-metadata/artifact-inventory.json \
+            --github-output "${GITHUB_OUTPUT}"
+      - name: Validate and pack the optional local MCPB
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.candidate.outputs.version }}"
+          mkdir -p mcpb-dist
+          npx -y @anthropic-ai/mcpb@2.1.2 validate manifest.json
+          npx -y @anthropic-ai/mcpb@2.1.2 pack . "mcpb-dist/openadapt-agent-${version}.mcpb"
+          python scripts/check_mcpb.py mcpb-dist/*.mcpb
+      - name: Validate server.json against the pinned MCP registry schema
+        run: python scripts/validate_server_schema.py --server-json server.json
+      - name: Bind the exact artifact names
+        id: names
+        run: |
+          echo "candidate_artifact_name=dist-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}" >> "${GITHUB_OUTPUT}"
+          echo "metadata_artifact_name=release-candidate-metadata-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}" >> "${GITHUB_OUTPUT}"
+      - name: Upload the checked Python distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.names.outputs.candidate_artifact_name }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - name: Upload the exact candidate metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.names.outputs.metadata_artifact_name }}
+          path: release-metadata/artifact-inventory.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload the checked optional local MCPB
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mcpb-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}
+          path: mcpb-dist/
+          if-no-files-found: error
+          retention-days: 30

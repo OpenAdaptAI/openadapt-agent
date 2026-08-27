@@ -1,43 +1,23 @@
-name: Release
+name: Publish admitted package
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Exact reviewed version on protected main
+        description: Exact admitted package version
         required: true
         type: string
       source_commit:
-        description: Full protected-main commit SHA to tag
+        description: Full admitted protected-main commit SHA
         required: true
         type: string
-  push:
-    tags: ["v*"]
-  pull_request:
-    paths:
-      - "CHANGELOG.md"
-      - "release-candidate.json"
-      - "pyproject.toml"
-      - "server.json"
-      - "manifest.json"
-      - ".mcpbignore"
-      - "src/openadapt_agent/__init__.py"
-      - "src/openadapt_agent/mcpb_entry.py"
-      - "scripts/check_mcpb.py"
-      - "scripts/check_release_artifacts.py"
-      - "scripts/check_dist.py"
-      - "scripts/check_source_boundary.py"
-      - "scripts/validate_server_schema.py"
-      - "scripts/verify_release_candidate.py"
-      - "scripts/verify_release_registries.py"
-      - "schemas/production-lifecycle-admission-candidate.schema.json"
-      - "source-policy.public.json"
-      - "tests/test_distribution.py"
-      - "tests/test_release_registries.py"
-      - ".github/workflows/release.yml"
+      admission_reference_json:
+        description: Compact signed qualification-release reference v2
+        required: true
+        type: string
 
 concurrency:
-  group: release-${{ github.event_name }}-${{ github.ref }}
+  group: admitted-release-${{ inputs.version }}-${{ inputs.source_commit }}
   cancel-in-progress: false
 
 permissions:
@@ -47,265 +27,44 @@ env:
   RELEASE_APP_ID: "4730708"
   RELEASE_APP_ACTOR_ID: "321543906"
   RELEASE_APP_INSTALLATION_ID: "156835568"
+  RELEASE_DISPATCHER_ACTOR_ID: "774615"
+  REPOSITORY_ID: "1136136670"
 
 jobs:
-  validate:
-    name: Build + validate (dry run, no publish)
+  authorize-request:
+    name: Authorize the release requester
     runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require the configured human launch dispatcher
+        env:
+          CONFIGURED_DISPATCHER_ID: ${{ vars.OPENADAPT_RELEASE_DISPATCHER_ACTOR_ID }}
+          EVENT_ACTOR_ID: ${{ github.actor_id }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_EVENT_NAME}" = "workflow_dispatch"
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${GITHUB_REPOSITORY}" = "OpenAdaptAI/openadapt-agent"
+          test "${CONFIGURED_DISPATCHER_ID}" = "${RELEASE_DISPATCHER_ACTOR_ID}"
+          test "${EVENT_ACTOR_ID}" = "${RELEASE_DISPATCHER_ACTOR_ID}"
+
+  acquire-release-artifacts:
+    name: Acquire the exact durable draft bytes
+    needs: authorize-request
+    runs-on: ubuntu-latest
+    environment: release-identity
+    permissions:
+      actions: read
+      contents: read
     outputs:
-      version: ${{ steps.candidate.outputs.version }}
-      tag: ${{ steps.candidate.outputs.tag }}
+      artifact_inventory_json: ${{ steps.inventory.outputs.artifact_inventory_json }}
+      candidate_artifact_name: ${{ steps.identity.outputs.candidate_artifact_name }}
+      draft_release_id: ${{ steps.release-assets.outputs.draft_release_id }}
       previous_version: ${{ steps.candidate.outputs.previous_version }}
+      release_state: ${{ steps.release-assets.outputs.release_state }}
       source_commit: ${{ steps.candidate.outputs.source_commit }}
-    steps:
-      - name: Checkout the exact event source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Bind the event to the reviewed release candidate
-        id: candidate
-        shell: bash
-        env:
-          REQUESTED_VERSION: ${{ inputs.version }}
-          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
-        run: |
-          set -euo pipefail
-          source_commit="$(git rev-parse HEAD)"
-          args=(
-            --event-name "${GITHUB_EVENT_NAME}"
-            --ref "${GITHUB_REF}"
-            --source-commit "${source_commit}"
-            --github-output "${GITHUB_OUTPUT}"
-          )
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            git fetch --no-tags origin \
-              "+refs/heads/main:refs/remotes/origin/main"
-            remote_main="$(git rev-parse refs/remotes/origin/main)"
-            if [ "${source_commit}" != "${GITHUB_SHA}" ] || \
-               [ "${source_commit}" != "${remote_main}" ]; then
-              echo "::error::The manual release source is not exact current main." >&2
-              exit 1
-            fi
-            args+=(
-              --requested-version "${REQUESTED_VERSION}"
-              --requested-source-commit "${REQUESTED_SOURCE_COMMIT}"
-            )
-          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            if [ "${GITHUB_ACTOR}" != "openadapt-release[bot]" ] || \
-               [ "${GITHUB_ACTOR_ID}" != "${RELEASE_APP_ACTOR_ID}" ] || \
-               [ "${{ vars.OPENADAPT_RELEASE_ACTOR_ID }}" != "${RELEASE_APP_ACTOR_ID}" ]; then
-              echo "::error::Only the exact release App tag can start publication." >&2
-              exit 1
-            fi
-            if [ "$(git cat-file -t "${GITHUB_REF}")" != "tag" ]; then
-              echo "::error::A release tag must be annotated." >&2
-              exit 1
-            fi
-            if [ "$(git rev-parse "${GITHUB_REF}^{commit}")" != "${source_commit}" ]; then
-              echo "::error::The release tag does not resolve to the checked-out commit." >&2
-              exit 1
-            fi
-          fi
-          python scripts/verify_release_candidate.py "${args[@]}"
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "20"
-      - name: Install tooling
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade build "twine>=6.1" "packaging>=24.2" jsonschema
-          python -m pip install -e ".[dev]"
-      - name: Run release contract tests
-        run: python -m pytest tests/test_distribution.py tests/test_release_registries.py -q
-      - name: Build sdist and wheel
-        run: python -m build
-      - name: Check the exact release archives
-        run: |
-          python scripts/check_release_artifacts.py dist
-          python scripts/check_dist.py dist/*
-          python scripts/check_source_boundary.py --require-dist
-      - name: Check the package metadata
-        run: twine check dist/*
-      - name: Validate and pack the local MCPB
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${{ steps.candidate.outputs.version }}"
-          mkdir -p mcpb-dist
-          npx -y @anthropic-ai/mcpb@2.1.2 validate manifest.json
-          npx -y @anthropic-ai/mcpb@2.1.2 pack . "mcpb-dist/openadapt-agent-${version}.mcpb"
-          python scripts/check_mcpb.py mcpb-dist/*.mcpb
-      - name: Validate server.json against the pinned MCP registry schema
-        run: python scripts/validate_server_schema.py --server-json server.json
-      - name: Upload the checked Python distributions
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: dist-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}
-          path: dist/
-          if-no-files-found: error
-          retention-days: 30
-      - name: Upload the checked local MCPB
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: mcpb-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}
-          path: mcpb-dist/
-          if-no-files-found: error
-          retention-days: 30
-
-  create-release-tag:
-    name: Create the reviewed annotated tag
-    needs: validate
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
-    environment: release-identity
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout protected main without stored credentials
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.validate.outputs.source_commit }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Revalidate current main and the requested candidate
-        id: existing
-        shell: bash
-        env:
-          EXPECTED_SOURCE_COMMIT: ${{ needs.validate.outputs.source_commit }}
-          EXPECTED_TAG: ${{ needs.validate.outputs.tag }}
-          EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ] || \
-             [ "${GITHUB_REF}" != "refs/heads/main" ] || \
-             [ "${GITHUB_SHA}" != "${EXPECTED_SOURCE_COMMIT}" ]; then
-            echo "::error::Tag creation requires the reviewed workflow_dispatch on exact main." >&2
-            exit 1
-          fi
-          git fetch --no-tags origin \
-            "+refs/heads/main:refs/remotes/origin/main"
-          remote_main="$(git rev-parse refs/remotes/origin/main)"
-          if [ "${remote_main}" != "${EXPECTED_SOURCE_COMMIT}" ] || \
-             [ "$(git rev-parse HEAD)" != "${EXPECTED_SOURCE_COMMIT}" ]; then
-            echo "::error::Main advanced after review. Dispatch the new exact candidate." >&2
-            exit 1
-          fi
-          python scripts/verify_release_candidate.py \
-            --event-name workflow_dispatch \
-            --ref refs/heads/main \
-            --source-commit "${EXPECTED_SOURCE_COMMIT}" \
-            --requested-version "${EXPECTED_VERSION}" \
-            --requested-source-commit "${EXPECTED_SOURCE_COMMIT}"
-          set +e
-          git ls-remote --exit-code --tags origin \
-            "refs/tags/${EXPECTED_TAG}" >/dev/null
-          tag_status=$?
-          set -e
-          if [ "${tag_status}" -eq 0 ]; then
-            git fetch --force origin \
-              "refs/tags/${EXPECTED_TAG}:refs/tags/${EXPECTED_TAG}"
-            if [ "$(git cat-file -t "refs/tags/${EXPECTED_TAG}")" != "tag" ] || \
-               [ "$(git rev-parse "refs/tags/${EXPECTED_TAG}^{commit}")" != \
-                 "${EXPECTED_SOURCE_COMMIT}" ]; then
-              echo "::error::The release tag exists with a different identity." >&2
-              exit 1
-            fi
-            echo "exists=true" >> "${GITHUB_OUTPUT}"
-            echo "The exact annotated release tag already exists. No ref changed."
-          elif [ "${tag_status}" -eq 2 ]; then
-            echo "exists=false" >> "${GITHUB_OUTPUT}"
-          else
-            echo "::error::Could not inspect the release tag." >&2
-            exit 1
-          fi
-      - name: Mint the release App token
-        if: ${{ steps.existing.outputs.exists != 'true' }}
-        id: release-app
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ vars.OPENADAPT_RELEASE_APP_ID }}
-          private-key: ${{ secrets.OPENADAPT_RELEASE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: openadapt-agent
-          permission-administration: read
-          permission-contents: write
-          permission-metadata: read
-      - name: Verify the exact release App installation
-        if: ${{ steps.existing.outputs.exists != 'true' }}
-        shell: bash
-        env:
-          CONFIGURED_APP_ID: ${{ vars.OPENADAPT_RELEASE_APP_ID }}
-          CONFIGURED_ACTOR_ID: ${{ vars.OPENADAPT_RELEASE_ACTOR_ID }}
-          CONFIGURED_INSTALLATION_ID: ${{ vars.OPENADAPT_RELEASE_APP_INSTALLATION_ID }}
-          GH_TOKEN: ${{ steps.release-app.outputs.token }}
-          TOKEN_INSTALLATION_ID: ${{ steps.release-app.outputs['installation-id'] }}
-        run: |
-          set -euo pipefail
-          test "${{ steps.release-app.outputs.app-slug }}" = "openadapt-release"
-          test "${CONFIGURED_APP_ID}" = "${RELEASE_APP_ID}"
-          test "${CONFIGURED_ACTOR_ID}" = "${RELEASE_APP_ACTOR_ID}"
-          test "${CONFIGURED_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
-          test "${TOKEN_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
-          test "$(gh api /installation --jq '.app_id | tostring')" = "${RELEASE_APP_ID}"
-          test "$(gh api /installation --jq '.id | tostring')" = "${RELEASE_APP_INSTALLATION_ID}"
-      - name: Require immutable GitHub releases
-        if: ${{ steps.existing.outputs.exists != 'true' }}
-        env:
-          GH_TOKEN: ${{ steps.release-app.outputs.token }}
-        run: |
-          set -euo pipefail
-          test "$(gh api "/repos/${GITHUB_REPOSITORY}/immutable-releases" \
-            --header 'X-GitHub-Api-Version: 2026-03-10' --jq '.enabled')" = "true"
-      - name: Create and push only the annotated release tag
-        if: ${{ steps.existing.outputs.exists != 'true' }}
-        shell: bash
-        env:
-          RELEASE_APP_TOKEN: ${{ steps.release-app.outputs.token }}
-          EXPECTED_SOURCE_COMMIT: ${{ needs.validate.outputs.source_commit }}
-          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
-          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
-        run: |
-          set -euo pipefail
-          set +e
-          git ls-remote --exit-code --tags origin \
-            "refs/tags/${RELEASE_TAG}" >/dev/null
-          tag_status=$?
-          set -e
-          case "${tag_status}" in
-            0)
-              echo "::error::The release tag appeared after validation. Refusing the race." >&2
-              exit 1
-              ;;
-            2) ;;
-            *)
-              echo "::error::Could not verify that the release tag is absent." >&2
-              exit 1
-              ;;
-          esac
-          git config user.name "OpenAdapt Release App"
-          git config user.email "openadapt-release[bot]@users.noreply.github.com"
-          git tag -a "${RELEASE_TAG}" "${EXPECTED_SOURCE_COMMIT}" \
-            -m "openadapt-agent ${RELEASE_VERSION}"
-          auth="$(printf 'x-access-token:%s' "${RELEASE_APP_TOKEN}" | base64 | tr -d '\n')"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"
-          git push origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
-
-  authorize-release-app:
-    name: Authorize the exact release App and immutable repository
-    needs: validate
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-    runs-on: ubuntu-latest
-    environment: release-identity
-    permissions:
-      contents: read
+      tag: ${{ steps.candidate.outputs.tag }}
+      version: ${{ steps.candidate.outputs.version }}
     steps:
       - name: Mint the repository-scoped release App token
         id: release-app
@@ -318,12 +77,12 @@ jobs:
           permission-administration: read
           permission-contents: write
           permission-metadata: read
-      - name: Verify the exact release App identity and immutable setting
+
+      - name: Verify the release App read authority
         env:
           CONFIGURED_APP_ID: ${{ vars.OPENADAPT_RELEASE_APP_ID }}
           CONFIGURED_ACTOR_ID: ${{ vars.OPENADAPT_RELEASE_ACTOR_ID }}
           CONFIGURED_INSTALLATION_ID: ${{ vars.OPENADAPT_RELEASE_APP_INSTALLATION_ID }}
-          EVENT_ACTOR_ID: ${{ github.actor_id }}
           GH_TOKEN: ${{ steps.release-app.outputs.token }}
           TOKEN_INSTALLATION_ID: ${{ steps.release-app.outputs['installation-id'] }}
         run: |
@@ -332,38 +91,431 @@ jobs:
           test "${CONFIGURED_APP_ID}" = "${RELEASE_APP_ID}"
           test "${CONFIGURED_ACTOR_ID}" = "${RELEASE_APP_ACTOR_ID}"
           test "${CONFIGURED_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
-          test "${EVENT_ACTOR_ID}" = "${RELEASE_APP_ACTOR_ID}"
           test "${TOKEN_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
-          test "$(gh api /installation --jq '.app_id | tostring')" = "${RELEASE_APP_ID}"
-          test "$(gh api /installation --jq '.id | tostring')" = "${RELEASE_APP_INSTALLATION_ID}"
-          test "$(gh api "/repos/${GITHUB_REPOSITORY}/immutable-releases" \
-            --header 'X-GitHub-Api-Version: 2026-03-10' --jq '.enabled')" = "true"
+          installation="$(gh api /installation)"
+          test "$(jq -r '.app_id | tostring' <<< "${installation}")" = "${RELEASE_APP_ID}"
+          test "$(jq -r '.id | tostring' <<< "${installation}")" = "${RELEASE_APP_INSTALLATION_ID}"
+          test "$(jq -r '.permissions.administration' <<< "${installation}")" = "read"
+          test "$(jq -r '.permissions.contents' <<< "${installation}")" = "write"
+          test "$(jq -r '.permissions.metadata' <<< "${installation}")" = "read"
+          repositories="$(gh api /installation/repositories)"
+          test "$(jq -r '.total_count' <<< "${repositories}")" -eq 1
+          test "$(jq -r '.repositories[0].id | tostring' <<< "${repositories}")" = "${REPOSITORY_ID}"
+          test "$(gh api '/users/openadapt-release%5Bbot%5D' --jq '.id | tostring')" = "${RELEASE_APP_ACTOR_ID}"
+
+      - name: Checkout the exact admitted source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bind the admitted identity to protected main
+        id: candidate
+        env:
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${REQUESTED_SOURCE_COMMIT}"
+          git fetch --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main"
+          git merge-base --is-ancestor \
+            "${REQUESTED_SOURCE_COMMIT}" refs/remotes/origin/main
+          python scripts/verify_release_candidate.py \
+            --event-name workflow_dispatch \
+            --ref refs/heads/main \
+            --source-commit "${REQUESTED_SOURCE_COMMIT}" \
+            --requested-version "${REQUESTED_VERSION}" \
+            --requested-source-commit "${REQUESTED_SOURCE_COMMIT}" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Find the App-authored Release with the admitted tag
+        env:
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            > "${RUNNER_TEMP}/release-pages.json"
+          jq --arg tag "${RELEASE_TAG}" '[.[][] | select(.tag_name == $tag)]' \
+            "${RUNNER_TEMP}/release-pages.json" > "${RUNNER_TEMP}/matching-releases.json"
+          test "$(jq 'length' "${RUNNER_TEMP}/matching-releases.json")" -eq 1
+          jq '.[0]' "${RUNNER_TEMP}/matching-releases.json" > "${RUNNER_TEMP}/release.json"
+          release_id="$(jq -r '.id' "${RUNNER_TEMP}/release.json")"
+          case "${release_id}" in
+            ''|*[!0-9]*)
+              echo "::error::The GitHub Release ID is invalid." >&2
+              exit 1
+              ;;
+          esac
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+            > "${RUNNER_TEMP}/assets.json"
+
+      - name: Download every App-staged release asset
+        env:
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          while IFS=$'\t' read -r asset_id asset_name; do
+            case "${asset_name}" in
+              *[!A-Za-z0-9._+-]*|"")
+                echo "::error::The staged release has an unsafe asset name." >&2
+                exit 1
+                ;;
+            esac
+            gh api \
+              --header "Accept: application/octet-stream" \
+              "/repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "dist/${asset_name}"
+          done < <(jq -r '.[] | [.id, .name] | @tsv' "${RUNNER_TEMP}/assets.json")
+
+      - name: Recheck and inventory the durable draft bytes
+        id: inventory
+        run: |
+          set -euo pipefail
+          mkdir -p release-metadata
+          python scripts/check_release_artifacts.py dist
+          python scripts/check_dist.py dist/*
+          python scripts/check_source_boundary.py --require-dist
+          python scripts/prepare_release_artifacts.py inventory \
+            --dist dist \
+            --output release-metadata/artifact-inventory.json \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Verify the App author, uploaders, metadata, and bytes
+        id: release-assets
+        env:
+          RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
+          SOURCE_COMMIT: ${{ steps.candidate.outputs.source_commit }}
+        run: |
+          python scripts/prepare_release_artifacts.py verify-release-assets \
+            --inventory release-metadata/artifact-inventory.json \
+            --release "${RUNNER_TEMP}/release.json" \
+            --assets "${RUNNER_TEMP}/assets.json" \
+            --asset-root dist \
+            --expected-tag "${RELEASE_TAG}" \
+            --expected-source-commit "${SOURCE_COMMIT}" \
+            --require-state either \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Bind the same-run artifact identity
+        id: identity
+        run: echo "candidate_artifact_name=dist-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Re-upload the exact durable bytes for central verification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.identity.outputs.candidate_artifact_name }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Retain the exact inventory in the publication run
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-metadata-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}
+          path: release-metadata/artifact-inventory.json
+          if-no-files-found: error
+          retention-days: 30
+
+  verify-production-release-admission:
+    name: Verify the signed Production release admission
+    needs: acquire-release-artifacts
+    uses: OpenAdaptAI/.github/.github/workflows/verify-production-release-admission.yml@CENTRAL_VERIFIER_SHA
+    permissions:
+      attestations: read
+      contents: read
+      id-token: write
+    with:
+      admission_reference_json: ${{ inputs.admission_reference_json }}
+      artifact_inventory_json: ${{ needs.acquire-release-artifacts.outputs.artifact_inventory_json }}
+      candidate_artifact_name: ${{ needs.acquire-release-artifacts.outputs.candidate_artifact_name }}
+      central_verifier_sha: CENTRAL_VERIFIER_SHA
+      expected_target: agent
+      expected_repository: OpenAdaptAI/openadapt-agent
+      expected_repository_id: "1136136670"
+      expected_source_commit: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+      expected_version: ${{ needs.acquire-release-artifacts.outputs.version }}
+      expected_tag: ${{ needs.acquire-release-artifacts.outputs.tag }}
+
+  create-or-verify-release-tag:
+    name: Create or verify the exact immutable annotated tag
+    needs: [acquire-release-artifacts, verify-production-release-admission]
+    runs-on: ubuntu-latest
+    environment: release-identity
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    steps:
+      - name: Checkout the exact admitted source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download the exact admitted distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.acquire-release-artifacts.outputs.candidate_artifact_name }}
+          path: dist/
+      - name: Download the exact admitted inventory
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-metadata-${{ needs.acquire-release-artifacts.outputs.version }}-${{ needs.acquire-release-artifacts.outputs.source_commit }}
+          path: release-metadata/
+      - name: Mint the repository-scoped release App token
+        id: release-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.OPENADAPT_RELEASE_APP_ID }}
+          private-key: ${{ secrets.OPENADAPT_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: openadapt-agent
+          permission-administration: read
+          permission-contents: write
+          permission-metadata: read
+
+      - name: Verify live App authority, draft evidence, and tag policy
+        id: live
+        env:
+          ADMITTED_DRAFT_RELEASE_ID: ${{ needs.verify-production-release-admission.outputs.draft_release_id }}
+          ADMITTED_STAGING_JSON: ${{ needs.verify-production-release-admission.outputs.publication_staging_json }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          RELEASE_TAG: ${{ needs.acquire-release-artifacts.outputs.tag }}
+          SOURCE_COMMIT: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+          TOKEN_INSTALLATION_ID: ${{ steps.release-app.outputs['installation-id'] }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.release-app.outputs.app-slug }}" = "openadapt-release"
+          test "${TOKEN_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
+          installation="$(gh api /installation)"
+          test "$(jq -r '.app_id | tostring' <<< "${installation}")" = "${RELEASE_APP_ID}"
+          test "$(jq -r '.id | tostring' <<< "${installation}")" = "${RELEASE_APP_INSTALLATION_ID}"
+          test "$(jq -r '.permissions.administration' <<< "${installation}")" = "read"
+          test "$(jq -r '.permissions.contents' <<< "${installation}")" = "write"
+          test "$(jq -r '.permissions.metadata' <<< "${installation}")" = "read"
+          repositories="$(gh api /installation/repositories)"
+          test "$(jq -r '.total_count' <<< "${repositories}")" -eq 1
+          test "$(jq -r '.repositories[0].id | tostring' <<< "${repositories}")" = "${REPOSITORY_ID}"
+          test "$(gh api '/users/openadapt-release%5Bbot%5D' --jq '.id | tostring')" = "${RELEASE_APP_ACTOR_ID}"
+          test "${ADMITTED_DRAFT_RELEASE_ID}" = "${{ needs.acquire-release-artifacts.outputs.draft_release_id }}"
+
+          gh api "/repos/${GITHUB_REPOSITORY}/immutable-releases" \
+            --header 'X-GitHub-Api-Version: 2026-03-10' > "${RUNNER_TEMP}/immutable-releases.json"
+          jq -e '
+            (keys == ["enabled","enforced_by_owner"]) and
+            .enabled == true and
+            (.enforced_by_owner | type) == "boolean"
+          ' "${RUNNER_TEMP}/immutable-releases.json" >/dev/null
+          rulesets="$(gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/rulesets?per_page=100" | jq -c '[.[][]]')"
+          test "$(jq '[.[] | select(.name == "OpenAdapt policy: release tag creation")] | length' <<< "${rulesets}")" -eq 1
+          test "$(jq '[.[] | select(.name == "OpenAdapt policy: immutable release tags")] | length' <<< "${rulesets}")" -eq 1
+          creation_id="$(jq -r '.[] | select(.name == "OpenAdapt policy: release tag creation") | .id' <<< "${rulesets}")"
+          immutable_id="$(jq -r '.[] | select(.name == "OpenAdapt policy: immutable release tags") | .id' <<< "${rulesets}")"
+          gh api "/repos/${GITHUB_REPOSITORY}/rulesets/${creation_id}" > "${RUNNER_TEMP}/creation-ruleset.json"
+          gh api "/repos/${GITHUB_REPOSITORY}/rulesets/${immutable_id}" > "${RUNNER_TEMP}/immutability-ruleset.json"
+          jq -e --argjson app_id "${RELEASE_APP_ID}" '
+            .name == "OpenAdapt policy: release tag creation" and
+            .target == "tag" and .enforcement == "active" and
+            .conditions.ref_name.include == ["refs/tags/v*"] and
+            .conditions.ref_name.exclude == [] and
+            .rules == [{"type":"creation"}] and
+            .bypass_actors == [{"actor_id":$app_id,"actor_type":"Integration","bypass_mode":"always"}]
+          ' "${RUNNER_TEMP}/creation-ruleset.json" >/dev/null
+          jq -e '
+            .name == "OpenAdapt policy: immutable release tags" and
+            .target == "tag" and .enforcement == "active" and
+            .conditions.ref_name.include == ["refs/tags/v*"] and
+            .conditions.ref_name.exclude == [] and
+            .bypass_actors == [] and
+            (.rules | sort_by(.type)) == [
+              {"type":"deletion"},
+              {"type":"non_fast_forward"},
+              {"type":"update","parameters":{"update_allows_fetch_and_merge":false}}
+            ]
+          ' "${RUNNER_TEMP}/immutability-ruleset.json" >/dev/null
+
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/${ADMITTED_DRAFT_RELEASE_ID}" > "${RUNNER_TEMP}/release.json"
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/${ADMITTED_DRAFT_RELEASE_ID}/assets?per_page=100" > "${RUNNER_TEMP}/assets.json"
+          python scripts/prepare_release_artifacts.py verify-release-assets \
+            --inventory release-metadata/artifact-inventory.json \
+            --release "${RUNNER_TEMP}/release.json" \
+            --assets "${RUNNER_TEMP}/assets.json" \
+            --asset-root dist \
+            --expected-tag "${RELEASE_TAG}" \
+            --expected-source-commit "${SOURCE_COMMIT}" \
+            --require-state either \
+            --github-output "${GITHUB_OUTPUT}"
+
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null
+          tag_status=$?
+          set -e
+          if [ "${tag_status}" -eq 0 ]; then
+            live_tag_state="present"
+          elif [ "${tag_status}" -eq 2 ]; then
+            live_tag_state="missing"
+          else
+            echo "::error::Could not inspect the release tag during policy verification." >&2
+            exit 1
+          fi
+
+          if [ "${live_tag_state}" = "missing" ]; then
+            test "$(jq -r '.draft' "${RUNNER_TEMP}/release.json")" = "true"
+            printf '%s' "${ADMITTED_STAGING_JSON}" > "${RUNNER_TEMP}/admitted-staging.json"
+            observed_at="$(jq -r '.observed_at' "${RUNNER_TEMP}/admitted-staging.json")"
+            jq -n --arg ref "refs/tags/${RELEASE_TAG}" \
+              '{ref:$ref,exists:false}' > "${RUNNER_TEMP}/tag-ref-state.json"
+            python scripts/prepare_release_artifacts.py staging-evidence \
+              --inventory release-metadata/artifact-inventory.json \
+              --release "${RUNNER_TEMP}/release.json" \
+              --assets "${RUNNER_TEMP}/assets.json" \
+              --creation-ruleset "${RUNNER_TEMP}/creation-ruleset.json" \
+              --immutability-ruleset "${RUNNER_TEMP}/immutability-ruleset.json" \
+              --immutable-releases "${RUNNER_TEMP}/immutable-releases.json" \
+              --tag-ref-state "${RUNNER_TEMP}/tag-ref-state.json" \
+              --asset-root dist \
+              --expected-tag "${RELEASE_TAG}" \
+              --expected-source-commit "${SOURCE_COMMIT}" \
+              --observed-at "${observed_at}" \
+              --output "${RUNNER_TEMP}/current-staging.json"
+            cmp "${RUNNER_TEMP}/admitted-staging.json" "${RUNNER_TEMP}/current-staging.json"
+          fi
+          echo "creation_ruleset_id=${creation_id}" >> "${GITHUB_OUTPUT}"
+          echo "immutable_ruleset_id=${immutable_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build the canonical tag binding
+        env:
+          ADMISSION_REFERENCE_JSON: ${{ inputs.admission_reference_json }}
+          ARTIFACT_INVENTORY_SHA256: ${{ needs.verify-production-release-admission.outputs.artifact_inventory_sha256 }}
+        run: |
+          set -euo pipefail
+          python scripts/prepare_release_artifacts.py verify-inventory --dist dist --inventory release-metadata/artifact-inventory.json
+          python scripts/prepare_release_artifacts.py tag-binding \
+            --admission-reference-json "${ADMISSION_REFERENCE_JSON}" \
+            --artifact-inventory-sha256 "${ARTIFACT_INVENTORY_SHA256}" \
+            --output release-metadata/tag-binding.json
+
+      - name: Inspect an existing tag before any effect
+        id: tag-state
+        env:
+          ADMISSION_REFERENCE_JSON: ${{ inputs.admission_reference_json }}
+          ARTIFACT_INVENTORY_SHA256: ${{ needs.verify-production-release-admission.outputs.artifact_inventory_sha256 }}
+          RELEASE_TAG: ${{ needs.acquire-release-artifacts.outputs.tag }}
+          SOURCE_COMMIT: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null
+          tag_status=$?
+          set -e
+          if [ "${tag_status}" -eq 0 ]; then
+            git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+            test "$(git cat-file -t "refs/tags/${RELEASE_TAG}")" = "tag"
+            test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")" = "${SOURCE_COMMIT}"
+            git cat-file tag "refs/tags/${RELEASE_TAG}" > "${RUNNER_TEMP}/tag-object"
+            python scripts/prepare_release_artifacts.py verify-tag-object \
+              --tag-object "${RUNNER_TEMP}/tag-object" \
+              --admission-reference-json "${ADMISSION_REFERENCE_JSON}" \
+              --artifact-inventory-sha256 "${ARTIFACT_INVENTORY_SHA256}"
+            echo "state=complete" >> "${GITHUB_OUTPUT}"
+          elif [ "${tag_status}" -eq 2 ]; then
+            test "${{ needs.acquire-release-artifacts.outputs.release_state }}" = "draft"
+            echo "state=missing" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::Could not inspect the release tag." >&2
+            exit 1
+          fi
+
+      - name: Recheck admission immediately before tag creation
+        if: ${{ steps.tag-state.outputs.state == 'missing' }}
+        id: fresh-admission
+        uses: ./.github/actions/verify-release-admission
+        with:
+          admission_reference_json: ${{ inputs.admission_reference_json }}
+          artifact_inventory_json: ${{ needs.acquire-release-artifacts.outputs.artifact_inventory_json }}
+          artifact_root: dist
+          central_verifier_sha: CENTRAL_VERIFIER_SHA
+          expected_source_commit: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+          expected_version: ${{ needs.acquire-release-artifacts.outputs.version }}
+          expected_tag: ${{ needs.acquire-release-artifacts.outputs.tag }}
+
+      - name: Create the exact admitted annotated tag
+        if: ${{ steps.tag-state.outputs.state == 'missing' }}
+        env:
+          ADMISSION_REFERENCE_JSON: ${{ inputs.admission_reference_json }}
+          ARTIFACT_INVENTORY_SHA256: ${{ needs.verify-production-release-admission.outputs.artifact_inventory_sha256 }}
+          RELEASE_APP_TOKEN: ${{ steps.release-app.outputs.token }}
+          RELEASE_TAG: ${{ needs.acquire-release-artifacts.outputs.tag }}
+          SOURCE_COMMIT: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          git config user.name "OpenAdapt Release App"
+          git config user.email "openadapt-release[bot]@users.noreply.github.com"
+          git tag -a --cleanup=verbatim "${RELEASE_TAG}" "${SOURCE_COMMIT}" -F release-metadata/tag-binding.json
+          git cat-file tag "refs/tags/${RELEASE_TAG}" > "${RUNNER_TEMP}/tag-object"
+          python scripts/prepare_release_artifacts.py verify-tag-object \
+            --tag-object "${RUNNER_TEMP}/tag-object" \
+            --admission-reference-json "${ADMISSION_REFERENCE_JSON}" \
+            --artifact-inventory-sha256 "${ARTIFACT_INVENTORY_SHA256}"
+          auth="$(printf 'x-access-token:%s' "${RELEASE_APP_TOKEN}" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"
+          git push origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+
+      - name: Record both principals and the exact policy IDs
+        env:
+          ADMISSION_SHA256: ${{ needs.verify-production-release-admission.outputs.admission_object_sha256 }}
+          CREATION_RULESET_ID: ${{ steps.live.outputs.creation_ruleset_id }}
+          IMMUTABLE_RULESET_ID: ${{ steps.live.outputs.immutable_ruleset_id }}
+          VERIFIED_AT: ${{ steps.fresh-admission.outputs.verified_at }}
+        run: |
+          {
+            echo "### Admitted tag authority"
+            echo ""
+            echo "- Requester: ${GITHUB_ACTOR} (${GITHUB_ACTOR_ID})"
+            echo "- Effect App: 4730708; installation: 156835568; bot user: 321543906"
+            echo "- Admission object: ${ADMISSION_SHA256}"
+            echo "- Fresh verification before creation: ${VERIFIED_AT:-not needed; tag already exact}"
+            echo "- Tag creation ruleset: ${CREATION_RULESET_ID}"
+            echo "- Tag immutability ruleset: ${IMMUTABLE_RULESET_ID}"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   bind-release-artifacts:
-    name: Attest the exact release artifacts
-    needs: [validate, authorize-release-app]
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    name: Attest the exact admitted release artifacts
+    needs: [acquire-release-artifacts, verify-production-release-admission, create-or-verify-release-tag]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       attestations: write
       contents: read
       id-token: write
     steps:
-      - name: Checkout the exact release tag
+      - name: Checkout the exact admitted source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
           persist-credentials: false
-      - name: Download the checked Python distributions
+      - name: Download the exact admitted distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dist-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.source_commit }}
+          name: ${{ needs.acquire-release-artifacts.outputs.candidate_artifact_name }}
           path: dist/
-      - name: Recheck the exact archives before attestation
-        run: |
-          python scripts/check_release_artifacts.py dist
-          python scripts/check_dist.py dist/*
-          python scripts/check_source_boundary.py --require-dist
+      - name: Recheck admission immediately before attestation
+        uses: ./.github/actions/verify-release-admission
+        with:
+          admission_reference_json: ${{ inputs.admission_reference_json }}
+          artifact_inventory_json: ${{ needs.acquire-release-artifacts.outputs.artifact_inventory_json }}
+          artifact_root: dist
+          central_verifier_sha: CENTRAL_VERIFIER_SHA
+          expected_source_commit: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+          expected_version: ${{ needs.acquire-release-artifacts.outputs.version }}
+          expected_tag: ${{ needs.acquire-release-artifacts.outputs.tag }}
       - name: Attest the exact wheel and source archive
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -372,41 +524,47 @@ jobs:
             dist/*.tar.gz
 
   pypi-publish:
-    name: Publish to PyPI
-    needs: [validate, authorize-release-app, bind-release-artifacts]
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    name: Publish the admitted bytes to PyPI
+    needs: [acquire-release-artifacts, verify-production-release-admission, create-or-verify-release-tag, bind-release-artifacts]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      actions: read
+      attestations: read
       contents: read
       id-token: write
     steps:
-      - name: Checkout the exact release tag
+      - name: Checkout the exact admitted source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
           persist-credentials: false
-      - name: Download the checked Python distributions
+      - name: Download the exact admitted distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dist-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.source_commit }}
+          name: ${{ needs.acquire-release-artifacts.outputs.candidate_artifact_name }}
           path: dist/
-      - name: Recheck the exact archives before publication
-        run: |
-          python scripts/check_release_artifacts.py dist
-          python scripts/check_source_boundary.py --require-dist
       - name: Inspect existing public state before publication
         id: public-state
-        env:
-          PREVIOUS_VERSION: ${{ needs.validate.outputs.previous_version }}
         run: |
           python scripts/verify_release_registries.py \
             --inspect-publication \
             --dist dist \
             --server-json server.json \
-            --version "${{ needs.validate.outputs.version }}" \
-            --previous-version "${PREVIOUS_VERSION}" \
+            --version "${{ needs.acquire-release-artifacts.outputs.version }}" \
+            --previous-version "${{ needs.acquire-release-artifacts.outputs.previous_version }}" \
             --github-output "${GITHUB_OUTPUT}"
+      - name: Recheck admission immediately before PyPI publication
+        if: ${{ steps.public-state.outputs.pypi_state != 'complete' }}
+        uses: ./.github/actions/verify-release-admission
+        with:
+          admission_reference_json: ${{ inputs.admission_reference_json }}
+          artifact_inventory_json: ${{ needs.acquire-release-artifacts.outputs.artifact_inventory_json }}
+          artifact_root: dist
+          central_verifier_sha: CENTRAL_VERIFIER_SHA
+          expected_source_commit: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+          expected_version: ${{ needs.acquire-release-artifacts.outputs.version }}
+          expected_tag: ${{ needs.acquire-release-artifacts.outputs.tag }}
       - name: Publish with PyPI Trusted Publishing
         if: ${{ steps.public-state.outputs.pypi_state != 'complete' }}
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
@@ -414,57 +572,53 @@ jobs:
           print-hash: true
           skip-existing: true
       - name: Verify the exact PyPI publication
-        env:
-          PREVIOUS_VERSION: ${{ needs.validate.outputs.previous_version }}
         run: |
           python scripts/verify_release_registries.py \
             --inspect-publication \
             --dist dist \
             --server-json server.json \
-            --version "${{ needs.validate.outputs.version }}" \
-            --previous-version "${PREVIOUS_VERSION}" \
+            --version "${{ needs.acquire-release-artifacts.outputs.version }}" \
+            --previous-version "${{ needs.acquire-release-artifacts.outputs.previous_version }}" \
             --require-pypi-state complete \
             --attempts 20 \
             --retry-seconds 15
 
   mcp-registry-publish:
-    name: Publish server.json to the MCP registry
-    needs: [validate, pypi-publish]
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    name: Publish the admitted descriptor to the MCP registry
+    needs: [acquire-release-artifacts, verify-production-release-admission, pypi-publish]
     runs-on: ubuntu-latest
     environment: mcp-registry
     permissions:
+      actions: read
+      attestations: read
       contents: read
       id-token: write
     steps:
-      - name: Checkout the exact release tag
+      - name: Checkout the exact admitted source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
           persist-credentials: false
-      - name: Download the exact attested Python distributions
+      - name: Download the exact admitted distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dist-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.source_commit }}
+          name: ${{ needs.acquire-release-artifacts.outputs.candidate_artifact_name }}
           path: dist/
       - name: Inspect existing MCP registry state
         id: public-state
-        env:
-          PREVIOUS_VERSION: ${{ needs.validate.outputs.previous_version }}
         run: |
           python scripts/verify_release_registries.py \
             --inspect-publication \
             --dist dist \
             --server-json server.json \
-            --version "${{ needs.validate.outputs.version }}" \
-            --previous-version "${PREVIOUS_VERSION}" \
+            --version "${{ needs.acquire-release-artifacts.outputs.version }}" \
+            --previous-version "${{ needs.acquire-release-artifacts.outputs.previous_version }}" \
             --github-output "${GITHUB_OUTPUT}" \
             --require-pypi-state complete \
             --attempts 20 \
             --retry-seconds 15
       - name: Install the pinned MCP registry publisher
         if: ${{ steps.public-state.outputs.mcp_state != 'complete' }}
-        shell: bash
         run: |
           set -euo pipefail
           publisher_version="1.8.1"
@@ -479,74 +633,194 @@ jobs:
       - name: Authenticate with GitHub OIDC
         if: ${{ steps.public-state.outputs.mcp_state != 'complete' }}
         run: ./mcp-publisher login github-oidc
+      - name: Recheck admission immediately before MCP publication
+        if: ${{ steps.public-state.outputs.mcp_state != 'complete' }}
+        uses: ./.github/actions/verify-release-admission
+        with:
+          admission_reference_json: ${{ inputs.admission_reference_json }}
+          artifact_inventory_json: ${{ needs.acquire-release-artifacts.outputs.artifact_inventory_json }}
+          artifact_root: dist
+          central_verifier_sha: CENTRAL_VERIFIER_SHA
+          expected_source_commit: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+          expected_version: ${{ needs.acquire-release-artifacts.outputs.version }}
+          expected_tag: ${{ needs.acquire-release-artifacts.outputs.tag }}
       - name: Publish the exact server descriptor
         if: ${{ steps.public-state.outputs.mcp_state != 'complete' }}
         run: ./mcp-publisher publish
       - name: Verify the exact MCP registry publication
-        env:
-          PREVIOUS_VERSION: ${{ needs.validate.outputs.previous_version }}
         run: |
           python scripts/verify_release_registries.py \
             --inspect-publication \
             --dist dist \
             --server-json server.json \
-            --version "${{ needs.validate.outputs.version }}" \
-            --previous-version "${PREVIOUS_VERSION}" \
+            --version "${{ needs.acquire-release-artifacts.outputs.version }}" \
+            --previous-version "${{ needs.acquire-release-artifacts.outputs.previous_version }}" \
             --require-pypi-state complete \
             --require-mcp-state complete \
             --attempts 20 \
             --retry-seconds 15
 
   registry-parity:
-    name: Verify registries and retain the admission input
-    needs: [validate, authorize-release-app, bind-release-artifacts, pypi-publish, mcp-registry-publish]
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    name: Verify the complete public registry state
+    needs: [acquire-release-artifacts, verify-production-release-admission, pypi-publish, mcp-registry-publish]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
     steps:
-      - name: Checkout the exact release tag
+      - name: Checkout the exact admitted source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
           persist-credentials: false
-      - name: Download the exact published Python distributions
+      - name: Download the exact admitted distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dist-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.source_commit }}
+          name: ${{ needs.acquire-release-artifacts.outputs.candidate_artifact_name }}
           path: dist/
-      - name: Checkout the canonical lifecycle policy
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: OpenAdaptAI/.github
-          ref: main
-          path: .production-lifecycle
-          persist-credentials: false
-      - name: Verify registry parity and write the unadmitted candidate
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
-          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
-          SOURCE_COMMIT: ${{ needs.validate.outputs.source_commit }}
+      - name: Verify byte parity and exact latest records
         run: |
-          set -euo pipefail
-          lifecycle_commit="$(git -C .production-lifecycle rev-parse HEAD)"
           python scripts/verify_release_registries.py \
+            --inspect-publication \
             --dist dist \
             --server-json server.json \
-            --version "${RELEASE_VERSION}" \
-            --tag "${RELEASE_TAG}" \
-            --source-commit "${SOURCE_COMMIT}" \
-            --lifecycle-policy .production-lifecycle/production-lifecycle-policy.json \
-            --lifecycle-source-commit "${lifecycle_commit}" \
-            --output release-metadata/production-admission-candidate.json \
+            --version "${{ needs.acquire-release-artifacts.outputs.version }}" \
+            --previous-version "${{ needs.acquire-release-artifacts.outputs.previous_version }}" \
+            --require-pypi-state complete \
+            --require-mcp-state complete \
             --attempts 20 \
             --retry-seconds 15
-          sha256sum release-metadata/production-admission-candidate.json
-      - name: Upload the bounded admission-candidate handoff
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+
+  finalize-github-release:
+    name: Publish and seal the App-authored GitHub Release
+    needs: [acquire-release-artifacts, verify-production-release-admission, create-or-verify-release-tag, registry-parity]
+    runs-on: ubuntu-latest
+    environment: release-identity
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    steps:
+      - name: Checkout the exact admitted source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: production-admission-candidate-${{ needs.validate.outputs.version }}
-          path: release-metadata/production-admission-candidate.json
-          if-no-files-found: error
-          retention-days: 30
+          ref: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download the exact admitted distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.acquire-release-artifacts.outputs.candidate_artifact_name }}
+          path: dist/
+      - name: Download the exact admitted inventory
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-metadata-${{ needs.acquire-release-artifacts.outputs.version }}-${{ needs.acquire-release-artifacts.outputs.source_commit }}
+          path: release-metadata/
+      - name: Mint the repository-scoped release App token
+        id: release-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.OPENADAPT_RELEASE_APP_ID }}
+          private-key: ${{ secrets.OPENADAPT_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: openadapt-agent
+          permission-administration: read
+          permission-contents: write
+          permission-metadata: read
+      - name: Reconcile the current GitHub Release state
+        id: release-state
+        env:
+          ADMISSION_REFERENCE_JSON: ${{ inputs.admission_reference_json }}
+          ARTIFACT_INVENTORY_SHA256: ${{ needs.verify-production-release-admission.outputs.artifact_inventory_sha256 }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          RELEASE_ID: ${{ needs.verify-production-release-admission.outputs.draft_release_id }}
+          RELEASE_TAG: ${{ needs.acquire-release-artifacts.outputs.tag }}
+          SOURCE_COMMIT: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.release-app.outputs.app-slug }}" = "openadapt-release"
+          test "${{ steps.release-app.outputs['installation-id'] }}" = "${RELEASE_APP_INSTALLATION_ID}"
+          installation="$(gh api /installation)"
+          test "$(jq -r '.app_id | tostring' <<< "${installation}")" = "${RELEASE_APP_ID}"
+          test "$(jq -r '.id | tostring' <<< "${installation}")" = "${RELEASE_APP_INSTALLATION_ID}"
+          test "$(jq -r '.permissions.administration' <<< "${installation}")" = "read"
+          test "$(jq -r '.permissions.contents' <<< "${installation}")" = "write"
+          test "$(jq -r '.permissions.metadata' <<< "${installation}")" = "read"
+          repositories="$(gh api /installation/repositories)"
+          test "$(jq -r '.total_count' <<< "${repositories}")" -eq 1
+          test "$(jq -r '.repositories[0].id | tostring' <<< "${repositories}")" = "${REPOSITORY_ID}"
+          test "$(gh api '/users/openadapt-release%5Bbot%5D' --jq '.id | tostring')" = "${RELEASE_APP_ACTOR_ID}"
+          gh api "/repos/${GITHUB_REPOSITORY}/immutable-releases" \
+            --header 'X-GitHub-Api-Version: 2026-03-10' > "${RUNNER_TEMP}/immutable-releases.json"
+          jq -e '
+            (keys == ["enabled","enforced_by_owner"]) and
+            .enabled == true and
+            (.enforced_by_owner | type) == "boolean"
+          ' "${RUNNER_TEMP}/immutable-releases.json" >/dev/null
+
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          test "$(git cat-file -t "refs/tags/${RELEASE_TAG}")" = "tag"
+          test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")" = "${SOURCE_COMMIT}"
+          git cat-file tag "refs/tags/${RELEASE_TAG}" > "${RUNNER_TEMP}/tag-object"
+          python scripts/prepare_release_artifacts.py verify-tag-object \
+            --tag-object "${RUNNER_TEMP}/tag-object" \
+            --admission-reference-json "${ADMISSION_REFERENCE_JSON}" \
+            --artifact-inventory-sha256 "${ARTIFACT_INVENTORY_SHA256}"
+
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > "${RUNNER_TEMP}/release.json"
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" > "${RUNNER_TEMP}/assets.json"
+          python scripts/prepare_release_artifacts.py verify-release-assets \
+            --inventory release-metadata/artifact-inventory.json \
+            --release "${RUNNER_TEMP}/release.json" \
+            --assets "${RUNNER_TEMP}/assets.json" \
+            --asset-root dist \
+            --expected-tag "${RELEASE_TAG}" \
+            --expected-source-commit "${SOURCE_COMMIT}" \
+            --require-state either \
+            --github-output "${GITHUB_OUTPUT}"
+      - name: Recheck admission immediately before final Release publication
+        if: ${{ steps.release-state.outputs.release_state == 'draft' }}
+        uses: ./.github/actions/verify-release-admission
+        with:
+          admission_reference_json: ${{ inputs.admission_reference_json }}
+          artifact_inventory_json: ${{ needs.acquire-release-artifacts.outputs.artifact_inventory_json }}
+          artifact_root: dist
+          central_verifier_sha: CENTRAL_VERIFIER_SHA
+          expected_source_commit: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+          expected_version: ${{ needs.acquire-release-artifacts.outputs.version }}
+          expected_tag: ${{ needs.acquire-release-artifacts.outputs.tag }}
+      - name: Publish the exact App-authored Release
+        if: ${{ steps.release-state.outputs.release_state == 'draft' }}
+        env:
+          ADMISSION_OBJECT_SHA256: ${{ needs.verify-production-release-admission.outputs.admission_object_sha256 }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          RELEASE_ID: ${{ needs.verify-production-release-admission.outputs.draft_release_id }}
+          SOURCE_COMMIT: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg admission "${ADMISSION_OBJECT_SHA256}" \
+            --arg commit "${SOURCE_COMMIT}" \
+            '{draft:false,make_latest:"true",body:("Exact Agent wheel and source archive admitted from commit " + $commit + ". Production admission: " + $admission)}' \
+            > "${RUNNER_TEMP}/publish-release.json"
+          gh api --method PATCH "/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --input "${RUNNER_TEMP}/publish-release.json" >/dev/null
+      - name: Verify the final immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          RELEASE_ID: ${{ needs.verify-production-release-admission.outputs.draft_release_id }}
+          RELEASE_TAG: ${{ needs.acquire-release-artifacts.outputs.tag }}
+          SOURCE_COMMIT: ${{ needs.acquire-release-artifacts.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > "${RUNNER_TEMP}/release.json"
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" > "${RUNNER_TEMP}/assets.json"
+          python scripts/prepare_release_artifacts.py verify-release-assets \
+            --inventory release-metadata/artifact-inventory.json \
+            --release "${RUNNER_TEMP}/release.json" \
+            --assets "${RUNNER_TEMP}/assets.json" \
+            --asset-root dist \
+            --expected-tag "${RELEASE_TAG}" \
+            --expected-source-commit "${SOURCE_COMMIT}" \
+            --require-state published
