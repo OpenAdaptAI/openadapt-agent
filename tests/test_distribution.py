@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import re
-import tomllib
 from pathlib import Path
 
 from openadapt_agent import __version__
@@ -79,11 +78,11 @@ def test_version_is_consistent_everywhere() -> None:
 
 def test_release_builder_emits_metadata_accepted_by_twine() -> None:
     """The exact builder pin prevents a release archive that Twine refuses."""
-    project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
-    assert project["build-system"] == {
-        "requires": ["hatchling==1.31.0"],
-        "build-backend": "hatchling.build",
-    }
+    project = PYPROJECT.read_text(encoding="utf-8")
+    build_system = re.search(r"(?ms)^\[build-system\]\n(.*?)(?=^\[)", project)
+    assert build_system
+    assert 'requires = ["hatchling==1.31.0"]' in build_system.group(1)
+    assert 'build-backend = "hatchling.build"' in build_system.group(1)
 
 
 def test_pypi_readme_proves_mcp_namespace_ownership() -> None:
