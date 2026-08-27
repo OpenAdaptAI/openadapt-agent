@@ -87,7 +87,7 @@ The App can't push a commit to `main`.
 | --- | --- | --- |
 | Pull request touching release files | `validate` | No. This is a dry run. |
 | Manual dispatch on exact current `main` | `validate`, then founder review in `release-identity`, then `create-release-tag` | No package publish. The App creates only the annotated tag. |
-| Push of the exact reviewed annotated tag | `validate` -> `pypi-publish` -> `mcp-registry-publish` -> `registry-parity` | Yes, after the two protected publication environments approve it. |
+| Push of the exact reviewed annotated tag | `validate` -> `bind-release-artifacts` -> `pypi-publish` -> `mcp-registry-publish` -> `registry-parity` | Yes, after the exact files are attested and the two protected publication environments approve them. |
 
 - **`validate`** builds the sdist+wheel and local MCPB, runs
   [`scripts/check_release_artifacts.py`](../scripts/check_release_artifacts.py)
@@ -101,21 +101,28 @@ The App can't push a commit to `main`.
   and manual dispatch so the pipeline is testable **without** publishing.
   An unavailable schema or changed schema bytes fail validation before any
   publisher can run.
+- **`bind-release-artifacts`** attests the exact wheel and source archive before
+  a publisher can use them. The workflow keeps the checked files for 30 days,
+  which is also the recovery window for that tag run.
 - **`create-release-tag`** runs only after the manual version and full commit
   inputs match the reviewed candidate on exact current `main`. The
   founder-reviewed `release-identity` environment supplies the release App
   identity. The App creates one annotated `vX.Y.Z` tag and pushes that ref.
   It doesn't push a version commit or update `main`.
-- **`pypi-publish`** runs only for the exact candidate tag. It rechecks the
-  archives and uploads with PyPI Trusted Publishing in the protected `pypi`
+- **`pypi-publish`** runs only for the exact candidate tag. Before an upload,
+  it compares every existing file with the attested build. It refuses an
+  unexpected name, digest, size, URL, yank state, or byte sequence. A retry can
+  upload a missing file from a partial release, but it can't replace or accept
+  a conflicting file. PyPI Trusted Publishing runs in the protected `pypi`
   environment. There is no API-token path.
-- **`mcp-registry-publish`** waits for the new version
-  to be live on PyPI (the registry validates package existence), then
-  runs `mcp-publisher login github-oidc` and `mcp-publisher publish` in the
-  protected `mcp-registry` environment. It needs no repository token
-  because the repo lives under the `OpenAdaptAI` org that owns the
-  `io.github.OpenAdaptAI` namespace. The workflow downloads a fixed
-  `mcp-publisher` version and verifies its SHA-256 before execution.
+- **`mcp-registry-publish`** first proves that PyPI has the complete exact file
+  set. It compares an existing MCP version with the reviewed `server.json` and
+  skips an exact prior publication. If the version is absent, it runs
+  `mcp-publisher login github-oidc` and `mcp-publisher publish` in the protected
+  `mcp-registry` environment. It needs no repository token because the repo
+  lives under the `OpenAdaptAI` org that owns the `io.github.OpenAdaptAI`
+  namespace. The workflow downloads a fixed `mcp-publisher` version and
+  verifies its SHA-256 before execution.
 - **Registry parity and admission input** run after both publishes. The
   workflow downloads each PyPI artifact and proves byte-for-byte equality
   with the archives produced by the protected build. It also proves that the
@@ -137,19 +144,26 @@ To cut a release, update the synchronized version fields, `CHANGELOG.md`, and
 commit. The protected job checks that `main` hasn't advanced before it creates
 the tag.
 
-If publication fails after the tag exists, rerun the failed job in that exact
-tag workflow run. Don't create a recovery tag or branch.
+If publication fails after the tag exists, rerun the failed jobs in that exact
+tag workflow run within 30 days. The rerun uses the original checked files. It
+checks public state before another upload and refuses any conflicting PyPI or
+MCP record. Don't rerun every job, create another tag, or create a recovery
+branch. Start a new reviewed release after the 30-day artifact window expires.
 
 ### 3.a Required repo configuration and secrets (FOUNDER, one-time)
 
 Complete this setup before the first App-created tag:
 
 1. **Release App identity.** Install the `openadapt-release` GitHub App on the
-   reviewed public repository set. Give it `Contents: write`; don't give it
-   another write permission. Add `OPENADAPT_RELEASE_APP_ID` as an environment
-   variable and `OPENADAPT_RELEASE_APP_PRIVATE_KEY` as an environment secret
-   in `release-identity`. Restrict that environment to `main` and require the
-   founder's review.
+   reviewed public repository set. Give it `Administration: read`,
+   `Contents: write`, and `Metadata: read`. Set
+   `OPENADAPT_RELEASE_APP_ID=4730708`,
+   `OPENADAPT_RELEASE_ACTOR_ID=321543906`, and
+   `OPENADAPT_RELEASE_APP_INSTALLATION_ID=156835568`. Add
+   `OPENADAPT_RELEASE_APP_PRIVATE_KEY` as an environment secret in
+   `release-identity`. Allow exact `main` and protected `v*` tag runs in that
+   environment, and require the founder's review. The workflow checks the App,
+   actor, and minted installation IDs before it changes a tag or publishes.
 2. **PyPI Trusted Publishing.** On https://pypi.org, keep the publisher for
    project `openadapt-agent` configured as:
    owner `OpenAdaptAI`, repo `openadapt-agent`, workflow `release.yml`,
@@ -158,6 +172,10 @@ Complete this setup before the first App-created tag:
 3. **Publication environments.** Restrict `pypi` and `mcp-registry` to `v*`
    tags. Both jobs use OIDC. `io.github.OpenAdaptAI/*` is authorized by the
    repository's MCP registry identity.
+4. **Immutable releases.** Enable GitHub immutable releases for
+   `OpenAdaptAI/openadapt-agent`. The workflow reads the repository setting
+   before tag creation and again before publication. Any value other than
+   `enabled: true` stops the release.
 
 ### 3.1 Decide the release version
 

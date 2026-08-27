@@ -236,6 +236,7 @@ def main() -> int:
             with args.github_output.open("a", encoding="utf-8") as output:
                 output.write(f"version={candidate['version']}\n")
                 output.write(f"tag={candidate['tag']}\n")
+                output.write(f"previous_version={candidate['previous_tag'][1:]}\n")
                 output.write(f"source_commit={args.source_commit}\n")
     except (CandidateError, OSError) as exc:
         print(f"RELEASE CANDIDATE REFUSED: {exc}", file=sys.stderr)

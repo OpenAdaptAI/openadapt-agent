@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import sys
+import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -45,6 +46,9 @@ _policy_binding = VERIFY._policy_binding
 build_candidate = VERIFY.build_candidate
 verify_mcp_registry = VERIFY.verify_mcp_registry
 verify_pypi = VERIFY.verify_pypi
+inspect_mcp_publication = VERIFY.inspect_mcp_publication
+inspect_publication = VERIFY.inspect_publication
+inspect_pypi_publication = VERIFY.inspect_pypi_publication
 RegistrySchemaError = SCHEMA_VALIDATOR.RegistrySchemaError
 SCHEMA_URL = SCHEMA_VALIDATOR.SCHEMA_URL
 validate_server_schema = SCHEMA_VALIDATOR.validate_server_schema
@@ -73,10 +77,19 @@ def _dist(tmp_path: Path) -> tuple[Path, dict[str, bytes]]:
     return dist, files
 
 
-def _pypi_fetch(files: dict[str, bytes], *, latest: str = VERSION):
+def _pypi_fetch(
+    files: dict[str, bytes],
+    *,
+    latest: str = VERSION,
+    published_names: set[str] | None = None,
+    exact_missing: bool = False,
+):
     urls = []
     bodies: dict[str, bytes] = {}
+    selected = set(files) if published_names is None else published_names
     for name, body in files.items():
+        if name not in selected:
+            continue
         url = f"https://files.pythonhosted.org/packages/test/{name}"
         bodies[url] = body
         urls.append(
@@ -90,11 +103,15 @@ def _pypi_fetch(files: dict[str, bytes], *, latest: str = VERSION):
         )
     version_url = f"https://pypi.org/pypi/{PYPI_PROJECT}/{VERSION}/json"
     latest_url = f"https://pypi.org/pypi/{PYPI_PROJECT}/json"
-    bodies[version_url] = _json_bytes({"info": {"version": VERSION}, "urls": urls})
+    if not exact_missing:
+        bodies[version_url] = _json_bytes({"info": {"version": VERSION}, "urls": urls})
     bodies[latest_url] = _json_bytes({"info": {"version": latest}})
 
     def fetch(url: str) -> bytes:
-        return bodies[url]
+        try:
+            return bodies[url]
+        except KeyError as exc:
+            raise urllib.error.HTTPError(url, 404, "not found", {}, None) from exc
 
     return fetch
 
@@ -119,7 +136,13 @@ def _server_json(tmp_path: Path) -> tuple[Path, dict]:
     return path, value
 
 
-def _mcp_fetch(server: dict, *, latest_version: str = VERSION):
+def _mcp_fetch(
+    server: dict,
+    *,
+    latest_version: str = VERSION,
+    exact_missing: bool = False,
+    latest_missing: bool = False,
+):
     normalized = json.loads(json.dumps(server))
     normalized["packages"][0]["environmentVariables"][0].pop("isRequired")
     version_url = (
@@ -137,13 +160,17 @@ def _mcp_fetch(server: dict, *, latest_version: str = VERSION):
             "isLatest": True,
         }
     }
-    bodies = {
-        version_url: _json_bytes({"server": normalized, "_meta": official}),
-        latest_url: _json_bytes({"server": latest_server, "_meta": official}),
-    }
+    bodies = {}
+    if not exact_missing:
+        bodies[version_url] = _json_bytes({"server": normalized, "_meta": official})
+    if not latest_missing:
+        bodies[latest_url] = _json_bytes({"server": latest_server, "_meta": official})
 
     def fetch(url: str) -> bytes:
-        return bodies[url]
+        try:
+            return bodies[url]
+        except KeyError as exc:
+            raise urllib.error.HTTPError(url, 404, "not found", {}, None) from exc
 
     return fetch
 
@@ -221,6 +248,133 @@ def test_pypi_newer_default_refuses_the_candidate(tmp_path: Path) -> None:
     dist, files = _dist(tmp_path)
     with pytest.raises(ReleaseVerificationError, match="PyPI latest is not the exact release"):
         verify_pypi(dist, VERSION, fetch=_pypi_fetch(files, latest="9.8.8"))
+
+
+def test_publication_inspection_accepts_missing_partial_and_complete_states(
+    tmp_path: Path,
+) -> None:
+    dist, files = _dist(tmp_path)
+    server_path, server = _server_json(tmp_path)
+    previous = "9.8.6"
+
+    assert (
+        inspect_pypi_publication(
+            dist,
+            VERSION,
+            previous,
+            fetch=_pypi_fetch(files, latest=previous, exact_missing=True),
+        )
+        == "missing"
+    )
+    first_name = next(iter(files))
+    assert (
+        inspect_pypi_publication(
+            dist,
+            VERSION,
+            previous,
+            fetch=_pypi_fetch(files, published_names={first_name}),
+        )
+        == "partial"
+    )
+    assert (
+        inspect_pypi_publication(
+            dist, VERSION, previous, fetch=_pypi_fetch(files)
+        )
+        == "complete"
+    )
+    assert (
+        inspect_mcp_publication(
+            server_path,
+            VERSION,
+            previous,
+            fetch=_mcp_fetch(server, latest_version=previous, exact_missing=True),
+        )
+        == "missing"
+    )
+    assert (
+        inspect_mcp_publication(
+            server_path, VERSION, previous, fetch=_mcp_fetch(server)
+        )
+        == "complete"
+    )
+
+
+def test_publication_inspection_rejects_mcp_before_complete_pypi(
+    tmp_path: Path,
+) -> None:
+    dist, files = _dist(tmp_path)
+    server_path, server = _server_json(tmp_path)
+    first_name = next(iter(files))
+
+    with pytest.raises(
+        ReleaseVerificationError,
+        match="MCP publication exists before the exact PyPI artifact set is complete",
+    ):
+        inspect_publication(
+            dist,
+            server_path,
+            VERSION,
+            "9.8.6",
+            pypi_fetch=_pypi_fetch(files, published_names={first_name}),
+            mcp_fetch=_mcp_fetch(server),
+        )
+
+
+def test_publication_inspection_rejects_unexpected_prior_defaults(
+    tmp_path: Path,
+) -> None:
+    dist, files = _dist(tmp_path)
+    server_path, server = _server_json(tmp_path)
+
+    with pytest.raises(ReleaseVerificationError, match="PyPI current version differs"):
+        inspect_pypi_publication(
+            dist,
+            VERSION,
+            "9.8.6",
+            fetch=_pypi_fetch(files, latest="9.8.5", exact_missing=True),
+        )
+    with pytest.raises(ReleaseVerificationError, match="MCP current version differs"):
+        inspect_mcp_publication(
+            server_path,
+            VERSION,
+            "9.8.6",
+            fetch=_mcp_fetch(server, latest_version="9.8.5", exact_missing=True),
+        )
+
+
+def test_publication_inspection_rejects_conflicting_public_bytes_and_identity(
+    tmp_path: Path,
+) -> None:
+    dist, files = _dist(tmp_path)
+    first_name = next(iter(files))
+    pypi = _pypi_fetch(files)
+
+    def conflicting_pypi(url: str) -> bytes:
+        body = pypi(url)
+        if url.endswith(first_name):
+            return b"x" * len(body)
+        return body
+
+    with pytest.raises(ReleaseVerificationError, match="PyPI bytes differ"):
+        inspect_pypi_publication(
+            dist, VERSION, "9.8.6", fetch=conflicting_pypi
+        )
+
+    server_path, server = _server_json(tmp_path)
+    mcp = _mcp_fetch(server, latest_version="9.8.6", exact_missing=True)
+
+    def conflicting_mcp(url: str) -> bytes:
+        body = mcp(url)
+        if url.endswith("/latest"):
+            value = json.loads(body)
+            value["server"]["packages"][0]["identifier"] = "other-project"
+            return _json_bytes(value)
+        return body
+
+    with pytest.raises(ReleaseVerificationError, match="MCP current package differs"):
+        inspect_mcp_publication(
+            server_path, VERSION, "9.8.6", fetch=conflicting_mcp
+        )
 
 
 def test_mcp_latest_metadata_must_equal_the_exact_server(tmp_path: Path) -> None:
@@ -315,11 +469,14 @@ def test_candidate_binds_head_and_the_annotated_previous_tag() -> None:
 def test_release_orders_publish_parity_then_candidate_and_pins_publisher() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     publish = workflow.index("./mcp-publisher publish")
-    parity = workflow.index("python scripts/verify_release_registries.py")
+    parity = workflow.index("Verify registry parity and write the unadmitted candidate")
     retain = workflow.index("Upload the bounded admission-candidate handoff")
     assert publish < parity < retain
     assert "registry-parity:" in workflow
-    assert "needs: [validate, pypi-publish, mcp-registry-publish]" in workflow
+    assert (
+        "needs: [validate, authorize-release-app, bind-release-artifacts, pypi-publish, "
+        "mcp-registry-publish]" in workflow
+    )
     assert "releases/latest/download" not in workflow
     assert 'publisher_version="1.8.1"' in workflow
     assert "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc" in workflow
@@ -332,14 +489,24 @@ def test_release_app_can_create_only_the_reviewed_annotated_tag() -> None:
     assert "environment: release-identity" in workflow
     assert "actions/create-github-app-token@" in workflow
     assert "vars.OPENADAPT_RELEASE_APP_ID" in workflow
+    assert "vars.OPENADAPT_RELEASE_ACTOR_ID" in workflow
+    assert "vars.OPENADAPT_RELEASE_APP_INSTALLATION_ID" in workflow
+    assert 'RELEASE_APP_ID: "4730708"' in workflow
+    assert 'RELEASE_APP_ACTOR_ID: "321543906"' in workflow
+    assert 'RELEASE_APP_INSTALLATION_ID: "156835568"' in workflow
     assert "secrets.OPENADAPT_RELEASE_APP_PRIVATE_KEY" in workflow
     assert "repositories: openadapt-agent" in workflow
     assert "permission-contents: write" in workflow
+    assert "permission-administration: read" in workflow
+    assert "permission-metadata: read" in workflow
     assert 'git tag -a "${RELEASE_TAG}" "${EXPECTED_SOURCE_COMMIT}"' in workflow
     pushes = [line.strip() for line in workflow.splitlines() if "push origin" in line]
     assert pushes == ['git push origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"']
     assert "push origin HEAD" not in workflow
     assert "refs/heads/main:refs/heads/main" not in workflow
+    assert "gh api /installation" in workflow
+    assert "immutable-releases" in workflow
+    assert "'.enabled'" in workflow
 
 
 def test_publication_uses_separate_oidc_environments_without_token_fallbacks() -> None:
@@ -347,8 +514,9 @@ def test_publication_uses_separate_oidc_environments_without_token_fallbacks() -
 
     assert "environment: pypi" in workflow
     assert "environment: mcp-registry" in workflow
-    assert workflow.count("id-token: write") == 2
+    assert workflow.count("id-token: write") == 3
     assert "pypa/gh-action-pypi-publish@" in workflow
+    assert "skip-existing: true" in workflow
     assert "./mcp-publisher login github-oidc" in workflow
     for forbidden in (
         "ADMIN_TOKEN",
@@ -369,12 +537,20 @@ def test_tag_jobs_fail_closed_and_recovery_reuses_the_exact_tag_run() -> None:
         "if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}"
     )
 
-    assert workflow.count(publish_guard) == 3
+    assert workflow.count(publish_guard) == 5
     assert "cancel-in-progress: false" in workflow
     assert "The exact annotated release tag already exists. No ref changed." in workflow
     assert "A release tag must be annotated." in workflow
     assert '--event-name "${GITHUB_EVENT_NAME}"' in workflow
     assert '--ref "${GITHUB_REF}"' in workflow
+    assert "GITHUB_TRIGGERING_ACTOR" not in workflow
+    assert "Could not inspect the release tag" in workflow
+    assert "Could not verify that the release tag is absent" in workflow
+    assert workflow.count("retention-days: 30") >= 3
+    assert "Attest the exact wheel and source archive" in workflow
+    assert "--inspect-publication" in workflow
+    assert "--require-pypi-state complete" in workflow
+    assert "--require-mcp-state complete" in workflow
     assert "recovery/" not in workflow
 
 

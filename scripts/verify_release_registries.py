@@ -38,6 +38,10 @@ class ReleaseVerificationError(RuntimeError):
     """The public release differs from its exact local candidate."""
 
 
+class PublicationNotReady(ReleaseVerificationError):
+    """The public registries have not reached a required exact state yet."""
+
+
 def _digest_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
@@ -76,6 +80,28 @@ def _fetch_object(url: str, fetch: Callable[[str], bytes]) -> tuple[dict[str, An
         value = json.loads(body)
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise ReleaseVerificationError(f"could not fetch valid JSON from {url}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ReleaseVerificationError(f"registry response must be an object: {url}")
+    return value, body
+
+
+def _fetch_optional_object(
+    url: str, fetch: Callable[[str], bytes]
+) -> tuple[dict[str, Any], bytes] | None:
+    """Fetch one registry object while treating only HTTP 404 as absent."""
+
+    try:
+        body = fetch(url)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise ReleaseVerificationError(f"registry request failed for {url}: {exc}") from exc
+    except (OSError, urllib.error.URLError, TimeoutError) as exc:
+        raise ReleaseVerificationError(f"registry request failed for {url}: {exc}") from exc
+    try:
+        value = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise ReleaseVerificationError(f"registry response is not valid JSON: {url}") from exc
     if not isinstance(value, dict):
         raise ReleaseVerificationError(f"registry response must be an object: {url}")
     return value, body
@@ -196,6 +222,108 @@ def verify_pypi(
     }
 
 
+def _verify_pypi_subset(
+    local: list[dict[str, Any]],
+    metadata: Mapping[str, Any],
+    version: str,
+    *,
+    fetch: Callable[[str], bytes],
+) -> int:
+    """Verify every already-published file against the exact local build."""
+
+    if metadata.get("info", {}).get("version") != version:
+        raise ReleaseVerificationError("PyPI version metadata differs from the release")
+    remote_files = metadata.get("urls")
+    if not isinstance(remote_files, list) or not all(
+        isinstance(item, dict) for item in remote_files
+    ):
+        raise ReleaseVerificationError("PyPI release file inventory is invalid")
+
+    expected = {item["name"]: item for item in local}
+    names = [item.get("filename") for item in remote_files]
+    if any(not isinstance(name, str) for name in names):
+        raise ReleaseVerificationError("PyPI release file inventory has an invalid filename")
+    if len(set(names)) != len(names):
+        raise ReleaseVerificationError("PyPI release file inventory has a duplicate filename")
+    unexpected = sorted(set(names) - set(expected))
+    if unexpected:
+        raise ReleaseVerificationError(
+            f"PyPI release contains unexpected files: {unexpected}"
+        )
+
+    for remote in remote_files:
+        artifact = expected[remote["filename"]]
+        remote_url = remote.get("url")
+        parsed = urlsplit(remote_url) if isinstance(remote_url, str) else None
+        if (
+            parsed is None
+            or parsed.scheme != "https"
+            or parsed.netloc != "files.pythonhosted.org"
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ReleaseVerificationError(
+                f"PyPI artifact URL is invalid: {artifact['name']}"
+            )
+        expected_metadata = {
+            "size": artifact["size_bytes"],
+            "sha256": artifact["sha256"].removeprefix("sha256:"),
+            "yanked": False,
+        }
+        actual_metadata = {
+            "size": remote.get("size"),
+            "sha256": remote.get("digests", {}).get("sha256"),
+            "yanked": remote.get("yanked"),
+        }
+        if actual_metadata != expected_metadata:
+            raise ReleaseVerificationError(
+                f"PyPI metadata differs for {artifact['name']}: {actual_metadata}"
+            )
+        public_bytes = fetch(remote_url)
+        if (
+            len(public_bytes) != artifact["size_bytes"]
+            or _digest_bytes(public_bytes) != artifact["sha256"]
+        ):
+            raise ReleaseVerificationError(
+                f"PyPI bytes differ from the build: {artifact['name']}"
+            )
+    return len(remote_files)
+
+
+def inspect_pypi_publication(
+    dist: Path,
+    version: str,
+    previous_version: str,
+    *,
+    fetch: Callable[[str], bytes] = _fetch_url,
+) -> str:
+    """Return missing, partial, or complete after exact byte verification."""
+
+    local = _local_artifacts(dist)
+    version_url = f"https://pypi.org/pypi/{PYPI_PROJECT}/{quote(version, safe='')}/json"
+    latest_url = f"https://pypi.org/pypi/{PYPI_PROJECT}/json"
+    version_result = _fetch_optional_object(version_url, fetch)
+    latest_result = _fetch_optional_object(latest_url, fetch)
+
+    if version_result is None:
+        if latest_result is not None:
+            latest_version = latest_result[0].get("info", {}).get("version")
+            if latest_version != previous_version:
+                raise ReleaseVerificationError(
+                    "PyPI current version differs from the reviewed previous release"
+                )
+        return "missing"
+
+    if latest_result is None or latest_result[0].get("info", {}).get("version") != version:
+        raise ReleaseVerificationError(
+            "PyPI latest is not the exact release; a newer or conflicting release exists"
+        )
+    published_count = _verify_pypi_subset(
+        local, version_result[0], version, fetch=fetch
+    )
+    return "complete" if published_count == len(local) else "partial"
+
+
 def _normalized_server(value: Mapping[str, Any]) -> dict[str, Any]:
     """Remove only defaults that the official registry omits on read."""
 
@@ -257,6 +385,107 @@ def verify_mcp_registry(
         "latest_response_sha256": _digest_bytes(latest_body),
         "server_sha256": _digest_bytes(_canonical_bytes(expected_normalized)),
     }
+
+
+def _mcp_version(value: Mapping[str, Any], label: str) -> str:
+    server = value.get("server")
+    if not isinstance(server, dict):
+        raise ReleaseVerificationError(f"MCP registry {label} server is missing")
+    version = server.get("version")
+    if not isinstance(version, str) or not version:
+        raise ReleaseVerificationError(f"MCP registry {label} version is invalid")
+    return version
+
+
+def inspect_mcp_publication(
+    server_json: Path,
+    version: str,
+    previous_version: str,
+    *,
+    fetch: Callable[[str], bytes] = _fetch_url,
+) -> str:
+    """Return missing or complete after exact MCP descriptor verification."""
+
+    expected = _load_object(server_json, "server.json")
+    if expected.get("name") != MCP_SERVER_NAME or expected.get("version") != version:
+        raise ReleaseVerificationError("server.json identity or version differs")
+    encoded_name = quote(MCP_SERVER_NAME, safe="")
+    encoded_version = quote(version, safe="")
+    version_url = f"{MCP_REGISTRY}/v0.1/servers/{encoded_name}/versions/{encoded_version}"
+    latest_url = f"{MCP_REGISTRY}/v0.1/servers/{encoded_name}/versions/latest"
+    version_result = _fetch_optional_object(version_url, fetch)
+    latest_result = _fetch_optional_object(latest_url, fetch)
+
+    if version_result is None:
+        if latest_result is not None:
+            latest = latest_result[0]
+            latest_server = latest.get("server")
+            if (
+                _mcp_version(latest, "latest") != previous_version
+                or not isinstance(latest_server, dict)
+                or latest_server.get("name") != MCP_SERVER_NAME
+            ):
+                raise ReleaseVerificationError(
+                    "MCP current version differs from the reviewed previous release"
+                )
+            packages = latest_server.get("packages")
+            if (
+                not isinstance(packages, list)
+                or len(packages) != 1
+                or not isinstance(packages[0], dict)
+                or packages[0].get("identifier") != PYPI_PROJECT
+                or packages[0].get("version") != previous_version
+            ):
+                raise ReleaseVerificationError(
+                    "MCP current package differs from the reviewed previous release"
+                )
+            official = _official_metadata(latest)
+            if official.get("status") != "active" or official.get("isLatest") is not True:
+                raise ReleaseVerificationError(
+                    "MCP current record is not the active latest release"
+                )
+        return "missing"
+    if latest_result is None:
+        raise ReleaseVerificationError("MCP exact release exists without a latest record")
+
+    expected_normalized = _normalized_server(expected)
+    for label, result in (("version", version_result), ("latest", latest_result)):
+        response = result[0]
+        server = response.get("server")
+        if not isinstance(server, dict) or _normalized_server(server) != expected_normalized:
+            raise ReleaseVerificationError(f"MCP registry {label} metadata differs")
+        official = _official_metadata(response)
+        if official.get("status") != "active" or official.get("isLatest") is not True:
+            raise ReleaseVerificationError(
+                f"MCP registry {label} is not the active latest release"
+            )
+    return "complete"
+
+
+def inspect_publication(
+    dist: Path,
+    server_json: Path,
+    version: str,
+    previous_version: str,
+    *,
+    pypi_fetch: Callable[[str], bytes] = _fetch_url,
+    mcp_fetch: Callable[[str], bytes] = _fetch_url,
+) -> tuple[str, str]:
+    """Inspect both registries and reject an impossible publication order."""
+
+    if SEMVER.fullmatch(version) is None or SEMVER.fullmatch(previous_version) is None:
+        raise ReleaseVerificationError("release version is invalid")
+    pypi_state = inspect_pypi_publication(
+        dist, version, previous_version, fetch=pypi_fetch
+    )
+    mcp_state = inspect_mcp_publication(
+        server_json, version, previous_version, fetch=mcp_fetch
+    )
+    if mcp_state == "complete" and pypi_state != "complete":
+        raise ReleaseVerificationError(
+            "MCP publication exists before the exact PyPI artifact set is complete"
+        )
+    return pypi_state, mcp_state
 
 
 def _policy_binding(policy_path: Path, source_commit: str) -> dict[str, Any]:
@@ -362,16 +591,77 @@ def main() -> int:
     parser.add_argument("--dist", type=Path, required=True)
     parser.add_argument("--server-json", type=Path, required=True)
     parser.add_argument("--version", required=True)
-    parser.add_argument("--tag", required=True)
-    parser.add_argument("--source-commit", required=True)
-    parser.add_argument("--lifecycle-policy", type=Path, required=True)
-    parser.add_argument("--lifecycle-source-commit", required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--tag")
+    parser.add_argument("--source-commit")
+    parser.add_argument("--lifecycle-policy", type=Path)
+    parser.add_argument("--lifecycle-source-commit")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--inspect-publication", action="store_true")
+    parser.add_argument("--previous-version")
+    parser.add_argument("--github-output", type=Path)
+    parser.add_argument(
+        "--require-pypi-state", choices=("missing", "partial", "complete")
+    )
+    parser.add_argument("--require-mcp-state", choices=("missing", "complete"))
     parser.add_argument("--attempts", type=int, default=1)
     parser.add_argument("--retry-seconds", type=int, default=15)
     args = parser.parse_args()
     if args.attempts < 1 or args.retry_seconds < 0:
         parser.error("attempts must be positive and retry-seconds cannot be negative")
+
+    if args.inspect_publication:
+        if args.previous_version is None:
+            parser.error("--inspect-publication requires --previous-version")
+        for attempt in range(1, args.attempts + 1):
+            try:
+                pypi_state, mcp_state = inspect_publication(
+                    args.dist,
+                    args.server_json,
+                    args.version,
+                    args.previous_version,
+                )
+                if (
+                    args.require_pypi_state is not None
+                    and pypi_state != args.require_pypi_state
+                ):
+                    raise PublicationNotReady(
+                        f"PyPI state is {pypi_state}, expected {args.require_pypi_state}"
+                    )
+                if (
+                    args.require_mcp_state is not None
+                    and mcp_state != args.require_mcp_state
+                ):
+                    raise PublicationNotReady(
+                        f"MCP state is {mcp_state}, expected {args.require_mcp_state}"
+                    )
+            except PublicationNotReady as exc:
+                if attempt == args.attempts:
+                    print(f"REFUSED: {exc}")
+                    return 1
+                print(f"Attempt {attempt}: {exc}; waiting {args.retry_seconds}s")
+                time.sleep(args.retry_seconds)
+                continue
+            except (ReleaseVerificationError, OSError) as exc:
+                print(f"REFUSED: {exc}")
+                return 1
+            if args.github_output is not None:
+                with args.github_output.open("a", encoding="utf-8") as output:
+                    output.write(f"pypi_state={pypi_state}\n")
+                    output.write(f"mcp_state={mcp_state}\n")
+            print(f"Verified publication state: PyPI={pypi_state}, MCP={mcp_state}")
+            return 0
+        return 1
+
+    required = {
+        "--tag": args.tag,
+        "--source-commit": args.source_commit,
+        "--lifecycle-policy": args.lifecycle_policy,
+        "--lifecycle-source-commit": args.lifecycle_source_commit,
+        "--output": args.output,
+    }
+    missing = [flag for flag, value in required.items() if value is None]
+    if missing:
+        parser.error("registry parity requires " + ", ".join(missing))
 
     for attempt in range(1, args.attempts + 1):
         try:

@@ -43,6 +43,11 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  RELEASE_APP_ID: "4730708"
+  RELEASE_APP_ACTOR_ID: "321543906"
+  RELEASE_APP_INSTALLATION_ID: "156835568"
+
 jobs:
   validate:
     name: Build + validate (dry run, no publish)
@@ -50,6 +55,7 @@ jobs:
     outputs:
       version: ${{ steps.candidate.outputs.version }}
       tag: ${{ steps.candidate.outputs.tag }}
+      previous_version: ${{ steps.candidate.outputs.previous_version }}
       source_commit: ${{ steps.candidate.outputs.source_commit }}
     steps:
       - name: Checkout the exact event source
@@ -87,8 +93,9 @@ jobs:
             )
           elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
             if [ "${GITHUB_ACTOR}" != "openadapt-release[bot]" ] || \
-               [ "${GITHUB_TRIGGERING_ACTOR}" != "openadapt-release[bot]" ]; then
-              echo "::error::Only the release App can start tag publication." >&2
+               [ "${GITHUB_ACTOR_ID}" != "${RELEASE_APP_ACTOR_ID}" ] || \
+               [ "${{ vars.OPENADAPT_RELEASE_ACTOR_ID }}" != "${RELEASE_APP_ACTOR_ID}" ]; then
+              echo "::error::Only the exact release App tag can start publication." >&2
               exit 1
             fi
             if [ "$(git cat-file -t "${GITHUB_REF}")" != "tag" ]; then
@@ -142,14 +149,14 @@ jobs:
           name: dist-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}
           path: dist/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
       - name: Upload the checked local MCPB
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mcpb-${{ steps.candidate.outputs.version }}-${{ steps.candidate.outputs.source_commit }}
           path: mcpb-dist/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
 
   create-release-tag:
     name: Create the reviewed annotated tag
@@ -195,8 +202,12 @@ jobs:
             --source-commit "${EXPECTED_SOURCE_COMMIT}" \
             --requested-version "${EXPECTED_VERSION}" \
             --requested-source-commit "${EXPECTED_SOURCE_COMMIT}"
-          if git ls-remote --exit-code --tags origin \
-             "refs/tags/${EXPECTED_TAG}" >/dev/null 2>&1; then
+          set +e
+          git ls-remote --exit-code --tags origin \
+            "refs/tags/${EXPECTED_TAG}" >/dev/null
+          tag_status=$?
+          set -e
+          if [ "${tag_status}" -eq 0 ]; then
             git fetch --force origin \
               "refs/tags/${EXPECTED_TAG}:refs/tags/${EXPECTED_TAG}"
             if [ "$(git cat-file -t "refs/tags/${EXPECTED_TAG}")" != "tag" ] || \
@@ -207,8 +218,11 @@ jobs:
             fi
             echo "exists=true" >> "${GITHUB_OUTPUT}"
             echo "The exact annotated release tag already exists. No ref changed."
-          else
+          elif [ "${tag_status}" -eq 2 ]; then
             echo "exists=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::Could not inspect the release tag." >&2
+            exit 1
           fi
       - name: Mint the release App token
         if: ${{ steps.existing.outputs.exists != 'true' }}
@@ -219,7 +233,35 @@ jobs:
           private-key: ${{ secrets.OPENADAPT_RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: openadapt-agent
+          permission-administration: read
           permission-contents: write
+          permission-metadata: read
+      - name: Verify the exact release App installation
+        if: ${{ steps.existing.outputs.exists != 'true' }}
+        shell: bash
+        env:
+          CONFIGURED_APP_ID: ${{ vars.OPENADAPT_RELEASE_APP_ID }}
+          CONFIGURED_ACTOR_ID: ${{ vars.OPENADAPT_RELEASE_ACTOR_ID }}
+          CONFIGURED_INSTALLATION_ID: ${{ vars.OPENADAPT_RELEASE_APP_INSTALLATION_ID }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          TOKEN_INSTALLATION_ID: ${{ steps.release-app.outputs['installation-id'] }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.release-app.outputs.app-slug }}" = "openadapt-release"
+          test "${CONFIGURED_APP_ID}" = "${RELEASE_APP_ID}"
+          test "${CONFIGURED_ACTOR_ID}" = "${RELEASE_APP_ACTOR_ID}"
+          test "${CONFIGURED_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
+          test "${TOKEN_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
+          test "$(gh api /installation --jq '.app_id | tostring')" = "${RELEASE_APP_ID}"
+          test "$(gh api /installation --jq '.id | tostring')" = "${RELEASE_APP_INSTALLATION_ID}"
+      - name: Require immutable GitHub releases
+        if: ${{ steps.existing.outputs.exists != 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "/repos/${GITHUB_REPOSITORY}/immutable-releases" \
+            --header 'X-GitHub-Api-Version: 2026-03-10' --jq '.enabled')" = "true"
       - name: Create and push only the annotated release tag
         if: ${{ steps.existing.outputs.exists != 'true' }}
         shell: bash
@@ -230,11 +272,22 @@ jobs:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin \
-             "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            echo "::error::The release tag appeared after validation. Refusing the race." >&2
-            exit 1
-          fi
+          set +e
+          git ls-remote --exit-code --tags origin \
+            "refs/tags/${RELEASE_TAG}" >/dev/null
+          tag_status=$?
+          set -e
+          case "${tag_status}" in
+            0)
+              echo "::error::The release tag appeared after validation. Refusing the race." >&2
+              exit 1
+              ;;
+            2) ;;
+            *)
+              echo "::error::Could not verify that the release tag is absent." >&2
+              exit 1
+              ;;
+          esac
           git config user.name "OpenAdapt Release App"
           git config user.email "openadapt-release[bot]@users.noreply.github.com"
           git tag -a "${RELEASE_TAG}" "${EXPECTED_SOURCE_COMMIT}" \
@@ -245,9 +298,82 @@ jobs:
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"
           git push origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
 
+  authorize-release-app:
+    name: Authorize the exact release App and immutable repository
+    needs: validate
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    environment: release-identity
+    permissions:
+      contents: read
+    steps:
+      - name: Mint the repository-scoped release App token
+        id: release-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.OPENADAPT_RELEASE_APP_ID }}
+          private-key: ${{ secrets.OPENADAPT_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: openadapt-agent
+          permission-administration: read
+          permission-contents: write
+          permission-metadata: read
+      - name: Verify the exact release App identity and immutable setting
+        env:
+          CONFIGURED_APP_ID: ${{ vars.OPENADAPT_RELEASE_APP_ID }}
+          CONFIGURED_ACTOR_ID: ${{ vars.OPENADAPT_RELEASE_ACTOR_ID }}
+          CONFIGURED_INSTALLATION_ID: ${{ vars.OPENADAPT_RELEASE_APP_INSTALLATION_ID }}
+          EVENT_ACTOR_ID: ${{ github.actor_id }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          TOKEN_INSTALLATION_ID: ${{ steps.release-app.outputs['installation-id'] }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.release-app.outputs.app-slug }}" = "openadapt-release"
+          test "${CONFIGURED_APP_ID}" = "${RELEASE_APP_ID}"
+          test "${CONFIGURED_ACTOR_ID}" = "${RELEASE_APP_ACTOR_ID}"
+          test "${CONFIGURED_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
+          test "${EVENT_ACTOR_ID}" = "${RELEASE_APP_ACTOR_ID}"
+          test "${TOKEN_INSTALLATION_ID}" = "${RELEASE_APP_INSTALLATION_ID}"
+          test "$(gh api /installation --jq '.app_id | tostring')" = "${RELEASE_APP_ID}"
+          test "$(gh api /installation --jq '.id | tostring')" = "${RELEASE_APP_INSTALLATION_ID}"
+          test "$(gh api "/repos/${GITHUB_REPOSITORY}/immutable-releases" \
+            --header 'X-GitHub-Api-Version: 2026-03-10' --jq '.enabled')" = "true"
+
+  bind-release-artifacts:
+    name: Attest the exact release artifacts
+    needs: [validate, authorize-release-app]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout the exact release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+      - name: Download the checked Python distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.source_commit }}
+          path: dist/
+      - name: Recheck the exact archives before attestation
+        run: |
+          python scripts/check_release_artifacts.py dist
+          python scripts/check_dist.py dist/*
+          python scripts/check_source_boundary.py --require-dist
+      - name: Attest the exact wheel and source archive
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+
   pypi-publish:
     name: Publish to PyPI
-    needs: validate
+    needs: [validate, authorize-release-app, bind-release-artifacts]
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     environment: pypi
@@ -269,10 +395,37 @@ jobs:
         run: |
           python scripts/check_release_artifacts.py dist
           python scripts/check_source_boundary.py --require-dist
+      - name: Inspect existing public state before publication
+        id: public-state
+        env:
+          PREVIOUS_VERSION: ${{ needs.validate.outputs.previous_version }}
+        run: |
+          python scripts/verify_release_registries.py \
+            --inspect-publication \
+            --dist dist \
+            --server-json server.json \
+            --version "${{ needs.validate.outputs.version }}" \
+            --previous-version "${PREVIOUS_VERSION}" \
+            --github-output "${GITHUB_OUTPUT}"
       - name: Publish with PyPI Trusted Publishing
+        if: ${{ steps.public-state.outputs.pypi_state != 'complete' }}
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           print-hash: true
+          skip-existing: true
+      - name: Verify the exact PyPI publication
+        env:
+          PREVIOUS_VERSION: ${{ needs.validate.outputs.previous_version }}
+        run: |
+          python scripts/verify_release_registries.py \
+            --inspect-publication \
+            --dist dist \
+            --server-json server.json \
+            --version "${{ needs.validate.outputs.version }}" \
+            --previous-version "${PREVIOUS_VERSION}" \
+            --require-pypi-state complete \
+            --attempts 20 \
+            --retry-seconds 15
 
   mcp-registry-publish:
     name: Publish server.json to the MCP registry
@@ -289,24 +442,28 @@ jobs:
         with:
           ref: ${{ github.ref }}
           persist-credentials: false
-      - name: Wait for the exact PyPI package
-        shell: bash
+      - name: Download the exact attested Python distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.source_commit }}
+          path: dist/
+      - name: Inspect existing MCP registry state
+        id: public-state
         env:
-          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          PREVIOUS_VERSION: ${{ needs.validate.outputs.previous_version }}
         run: |
-          set -euo pipefail
-          url="https://pypi.org/pypi/openadapt-agent/${RELEASE_VERSION}/json"
-          for attempt in $(seq 1 20); do
-            code="$(curl --silent --output /dev/null --write-out '%{http_code}' "${url}")"
-            if [ "${code}" = "200" ]; then
-              exit 0
-            fi
-            echo "Attempt ${attempt}: PyPI returned ${code}; waiting 15 seconds."
-            sleep 15
-          done
-          echo "::error::The exact Agent release did not appear on PyPI." >&2
-          exit 1
+          python scripts/verify_release_registries.py \
+            --inspect-publication \
+            --dist dist \
+            --server-json server.json \
+            --version "${{ needs.validate.outputs.version }}" \
+            --previous-version "${PREVIOUS_VERSION}" \
+            --github-output "${GITHUB_OUTPUT}" \
+            --require-pypi-state complete \
+            --attempts 20 \
+            --retry-seconds 15
       - name: Install the pinned MCP registry publisher
+        if: ${{ steps.public-state.outputs.mcp_state != 'complete' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -320,13 +477,29 @@ jobs:
           tar xzf "${archive}" mcp-publisher
           ./mcp-publisher --version
       - name: Authenticate with GitHub OIDC
+        if: ${{ steps.public-state.outputs.mcp_state != 'complete' }}
         run: ./mcp-publisher login github-oidc
       - name: Publish the exact server descriptor
+        if: ${{ steps.public-state.outputs.mcp_state != 'complete' }}
         run: ./mcp-publisher publish
+      - name: Verify the exact MCP registry publication
+        env:
+          PREVIOUS_VERSION: ${{ needs.validate.outputs.previous_version }}
+        run: |
+          python scripts/verify_release_registries.py \
+            --inspect-publication \
+            --dist dist \
+            --server-json server.json \
+            --version "${{ needs.validate.outputs.version }}" \
+            --previous-version "${PREVIOUS_VERSION}" \
+            --require-pypi-state complete \
+            --require-mcp-state complete \
+            --attempts 20 \
+            --retry-seconds 15
 
   registry-parity:
     name: Verify registries and retain the admission input
-    needs: [validate, pypi-publish, mcp-registry-publish]
+    needs: [validate, authorize-release-app, bind-release-artifacts, pypi-publish, mcp-registry-publish]
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:

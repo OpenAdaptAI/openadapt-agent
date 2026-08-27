@@ -91,7 +91,12 @@ def test_release_tag_publication_accepts_only_the_release_app() -> None:
     """A user-created tag must not reach either protected publisher."""
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     assert '[ "${GITHUB_ACTOR}" != "openadapt-release[bot]" ]' in workflow
-    assert '[ "${GITHUB_TRIGGERING_ACTOR}" != "openadapt-release[bot]" ]' in workflow
+    assert 'vars.OPENADAPT_RELEASE_ACTOR_ID' in workflow
+    assert '[ "${GITHUB_ACTOR_ID}" != "${RELEASE_APP_ACTOR_ID}" ]' in workflow
+    assert '[ "${{ vars.OPENADAPT_RELEASE_ACTOR_ID }}" != "${RELEASE_APP_ACTOR_ID}" ]' in workflow
+    assert 'EVENT_ACTOR_ID: ${{ github.actor_id }}' in workflow
+    assert 'test "${EVENT_ACTOR_ID}" = "${RELEASE_APP_ACTOR_ID}"' in workflow
+    assert "GITHUB_TRIGGERING_ACTOR" not in workflow
 
 
 def test_release_actions_are_pinned_to_commits() -> None:
