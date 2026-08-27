@@ -1,5 +1,8 @@
 [build-system]
-requires = ["hatchling"]
+# Hatchling 1.32 emits Core Metadata 2.5, which Twine 6.2 rejects.
+# Keep the release archives on the newest metadata version accepted by the
+# exact package checker until that checker adds 2.5 support.
+requires = ["hatchling==1.31.0"]
 build-backend = "hatchling.build"
 
 [project]
