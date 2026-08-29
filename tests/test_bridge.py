@@ -37,6 +37,17 @@ def run_tool(bridge: AgentBridge) -> str:
     return f"run_{workflow_id(bridge)}"
 
 
+def test_public_synthetic_run_tool_uses_slug(bundles_root, runner_config):
+    bridge = AgentBridge(
+        bundles_root,
+        runner_config,
+        allow_run=True,
+        public_synthetic=True,
+    )
+    names = [spec.name for spec in bridge.list_tool_specs() if spec.name.startswith("run_")]
+    assert names == ["run_demo_triage"]
+
+
 def test_schema_uses_opaque_id_requires_params_and_exports_no_examples(
     bundles_root,
     runner_config,

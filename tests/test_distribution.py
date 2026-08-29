@@ -20,6 +20,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 CI
     import tomli as tomllib
 
 from openadapt_agent import __version__
+from openadapt_agent.copy import IDENTITY_SENTENCE, SKILL_WHEN_TO_USE, THREE_LINE_INSTALL
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVER_JSON = REPO_ROOT / "server.json"
@@ -213,10 +214,47 @@ def test_llms_txt_lists_the_tool_surface() -> None:
         "list_needs_attention",
         "get_attention_item",
         "run_workflow_<opaque-id>",
+        "run_local_quickstart",
+        "--tutorial",
         "continue_attention",
         "skip_attention",
         "teach_attention",
         "escalate_attention",
         "docs.openadapt.ai",
+        IDENTITY_SENTENCE,
     ):
         assert token in text
+
+
+def _readme_first_paragraph() -> str:
+    lines: list[str] = []
+    started = False
+    for line in README.read_text(encoding="utf-8").splitlines():
+        if not started:
+            stripped = line.strip()
+            if (
+                not stripped
+                or stripped.startswith("#")
+                or stripped.startswith("[")
+                or stripped.startswith("`")
+            ):
+                continue
+            started = True
+        if started:
+            if not line.strip():
+                break
+            lines.append(line.strip())
+    return " ".join(lines)
+
+
+def test_identity_sentence_is_shared() -> None:
+    assert _readme_first_paragraph() == IDENTITY_SENTENCE
+    assert IDENTITY_SENTENCE == _server_json()["description"]
+    assert IDENTITY_SENTENCE in LLMS_TXT.read_text(encoding="utf-8")
+    skill = REPO_ROOT / "skills" / "openadapt-gui-write" / "SKILL.md"
+    text = skill.read_text(encoding="utf-8")
+    assert f'description: "{IDENTITY_SENTENCE}"' in text
+    assert SKILL_WHEN_TO_USE in text
+    assert "name: computer-use" not in text.lower()
+    assert THREE_LINE_INSTALL in README.read_text(encoding="utf-8")
+    assert "openadapt quickstart --break-it" in README.read_text(encoding="utf-8")

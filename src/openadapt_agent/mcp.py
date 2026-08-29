@@ -110,7 +110,8 @@ def build_server(bridge: AgentBridge) -> Server:
             "never re-actuate the human-completed step. "
             "Reject terminates the run and dispatches no new action, but earlier "
             "run effects still require review of the protected local outcome. "
-            "Never report a halted, refused, or timed-out run as a success."
+            "Never report a halted, refused, timed-out, or error run as a success. "
+            "If execution_outcome is HALTED, tell the user the record did not change."
         ),
     )
 

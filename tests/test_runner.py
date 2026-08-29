@@ -54,6 +54,21 @@ def test_halt_maps_to_structured_halt_not_success(
     assert "report.json" in outcome.detail
 
 
+def test_halted_execution_outcome_tells_the_caller_the_record_did_not_change(
+    monkeypatch, runner_config, bundle_dir, halt_report
+):
+    halt_report["execution_outcome"] = "HALTED"
+    halt_report["success"] = False
+    stub = FlowCliStub(exit_code=1, report=halt_report)
+    outcome = _run(monkeypatch, runner_config, stub, bundle_dir=bundle_dir)
+    payload = outcome.to_dict()
+    assert payload["status"] == "halt"
+    assert payload["success"] is False
+    assert payload["execution_outcome"] == "HALTED"
+    assert payload["message"].startswith("HALTED.")
+    assert "record did not change" in payload["message"]
+
+
 def test_exit_zero_with_failed_report_is_never_success(
     monkeypatch, runner_config, bundle_dir, halt_report
 ):

@@ -93,11 +93,13 @@ class AgentBridge:
         attended: Optional[AttendedBridge] = None,
         allow_protected_export: bool = False,
         allow_recorded_defaults: bool = False,
+        public_synthetic: bool = False,
     ):
         self.bundles_dir = Path(bundles_dir)
         self.allow_run = allow_run
         self.allow_protected_export = allow_protected_export
         self.allow_recorded_defaults = allow_recorded_defaults
+        self.public_synthetic = public_synthetic
         self.runner_config = runner_config
         self.runner = runner or FlowRunner(runner_config)
         self.attended = attended or AttendedBridge(
@@ -107,7 +109,7 @@ class AgentBridge:
         )
         self.workflows: dict[str, WorkflowInfo] = {}
         for info in discover_bundles(self.bundles_dir):
-            base_id = info.public_id
+            base_id = info.slug if public_synthetic else info.public_id
             workflow_id = base_id
             suffix = 2
             while workflow_id in self.workflows:

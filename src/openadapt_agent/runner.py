@@ -79,6 +79,11 @@ _PUBLIC_MESSAGES = {
 
 def public_outcome_message(status: str, execution_outcome: Optional[str]) -> str:
     """Return fixed public copy for one classified terminal result."""
+    if status == "halt" and execution_outcome == "HALTED":
+        return (
+            "HALTED. The independent check did not confirm the write. "
+            "Tell the user the record did not change."
+        )
     if status == "halt" and execution_outcome == "COMPLETED_UNVERIFIED":
         return (
             "The run completed, but its persisted evidence did not prove "

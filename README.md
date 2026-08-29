@@ -5,60 +5,47 @@
 
 `mcp-name: io.github.OpenAdaptAI/openadapt-agent`
 
-Give an MCP client, or an Agent Skill, a compiled OpenAdapt workflow. Flow
-still runs it. This package is the local surface in front of
-[`openadapt-flow`](https://github.com/OpenAdaptAI/openadapt-flow): policy,
-identity, verification, pauses, repair, and audit stay there.
+OpenAdapt is a compiled program for repeating GUI writes that have no API, and this package is the local MCP and Agent Skill adapter that invokes that program.
 
-`openadapt-agent serve` exposes the bundle and the local **Needs Attention**
-queue over MCP stdio. `openadapt-agent emit-skill` writes a skill folder with
-the halt semantics the agent has to follow. A healthy call goes through Flow's
-governed `run`. A halt or a refusal comes back as that, never as a fabricated
-success.
+Flow still runs the program. Policy, identity, verification, pauses, repair, and audit stay in [`openadapt-flow`](https://github.com/OpenAdaptAI/openadapt-flow). A healthy call goes through Flow's governed `run`. HALTED, refused, timeout, and error come back as those outcomes. Don't summarize any of them as success.
 
 ## Install
 
+Claude Code / Cursor, three lines. The server generates the public synthetic tutorial at serve time. It is not in the wheel.
+
 ```bash
-pip install openadapt-agent
+claude mcp add openadapt -- \
+  uvx --from 'openadapt-agent[tutorial]' openadapt-agent \
+  serve --tutorial --allow-run
 ```
 
-Or skip the install. `uvx` is the MCP-client entry point:
+`--allow-run` is an explicit opt-in. Admission stays fail-closed.
+
+The halt demo is `openadapt quickstart --break-it`. After the verified run, the same certified bundle hits a backend that paints a success banner and rejects the write. An independent system-of-record read catches the lie. The record did not change.
+
+```bash
+python -m pip install --upgrade 'openadapt[browser]'
+openadapt quickstart --break-it
+```
+
+Python 3.10 through 3.12. `pip install openadapt-agent` is the library install if you already have a private compiled bundle.
 
 ```bash
 uvx openadapt-agent serve --bundles /path/to/bundles          # read-only
 uvx openadapt-agent serve --bundles /path/to/bundles --allow-run
 ```
 
-Python 3.10 through 3.12. The package pulls in a compatible `openadapt-flow`
-and the official MCP SDK.
-
 ## Serve a bundle
 
-Make a local tutorial bundle with the launcher, then serve that directory:
+`--tutorial` records, compiles, and certifies the synthetic MockMed workflow, then keeps that app up so a governed run can hit a live system of record. Private customer bundles still use `--bundles`. Those stay on the operator's disk and are never shipped in this package.
 
 ```bash
-python -m pip install --upgrade 'openadapt[browser]'
-openadapt quickstart --out /tmp/openadapt-agent-demo
-
-openadapt-agent serve \
-  --bundles /tmp/openadapt-agent-demo/bundle \
-  --runs-dir /tmp/openadapt-runs
-```
-
-Register it with a client that takes a local stdio command:
-
-```bash
-claude mcp add openadapt-workflows -- \
-  openadapt-agent serve \
-    --bundles /tmp/openadapt-agent-demo/bundle \
-    --runs-dir /tmp/openadapt-runs
+openadapt-agent serve --tutorial --allow-run --runs-dir /tmp/openadapt-runs
 ```
 
 The client gets `list_workflows`, `get_workflow`, `get_run_report`,
-`list_needs_attention`, and `get_attention_item`. Those are read-only.
-`quickstart` stops its synthetic app after the verified tutorial run, so this
-retained bundle is something you can inspect. It isn't a second runnable
-tutorial.
+`list_needs_attention`, and `get_attention_item`. Those are read-only until
+`--allow-run`. The synthetic tutorial registers `run_local_quickstart`.
 
 Add `--allow-run` and the server registers one typed `run_workflow_<opaque-id>`
 tool per loadable bundle. Declared parameters are required. Recorded
@@ -149,6 +136,7 @@ Continue and Skip.
 | `list_needs_attention` | Always |
 | `get_attention_item` | Always |
 | `run_workflow_<opaque-id>` | `--allow-run` |
+| `run_local_quickstart` | `--tutorial --allow-run` |
 | `reject_attention`, `teach_attention`, `escalate_attention` | `--allow-attended-actions` |
 | `continue_attention`, `skip_attention` | `--allow-attended-actions` plus a qualified deployment `--config` |
 
@@ -159,7 +147,7 @@ Every `run_workflow_<opaque-id>` call returns one of these:
 | `status` | Meaning |
 | --- | --- |
 | `success` | The process exited successfully and the persisted report records `execution_outcome: VERIFIED`. Legacy reports must record `success: true`. |
-| `halt` | Execution halted, completed without enough verification, or completed a rollback. Not a verified success. Protected evidence stays local. |
+| `halt` | Execution halted, completed without enough verification, or completed a rollback. Not a verified success. If `execution_outcome` is `HALTED`, tell the user the record did not change. Protected evidence stays local. |
 | `refused` | A governed admission gate refused the bundle before execution. Nothing ran. |
 | `timeout` | The process exceeded its deadline. The target may be partly executed. Inspect it before retrying. |
 | `error` | The CLI, report, or other execution infrastructure was inconsistent. |
@@ -180,10 +168,14 @@ openadapt-agent emit-skill \
 ```
 
 This wraps Flow's own skill emitter, keeps its portable bundle, and adds MCP
-invocation, Needs Attention, and result-handling guidance. The folder isn't a
-sanitized derivative. It includes the compiled bundle. Treat it as protected
-workflow data and install it only into an agent that's allowed that same
-boundary.
+invocation, Needs Attention, and result-handling guidance. The frontmatter
+description is the same sentence as `server.json` and `llms.txt`. The skill
+is named from the workflow slug, never "computer use". If the tool returns
+HALTED, tell the user the record did not change.
+
+A first-party copy lives at [`skills/openadapt-gui-write/SKILL.md`](skills/openadapt-gui-write/SKILL.md).
+A folder emitted from a private bundle isn't a sanitized derivative. It
+includes the compiled bundle. Treat that as protected workflow data.
 
 ## Trust boundary
 
@@ -227,9 +219,10 @@ Before v2 this repository wrapped model-driven GUI agents. That execution path
 now lives in `openadapt-flow`. The current name stays because the package
 bridges MCP and Agent Skills. It isn't an MCP-only package.
 
-The public capability is the server. A user's compiled workflow is their
-private artifact, supplied at launch with `--bundles` and never embedded in
-the package or a registry listing. See
+The public capability is the server. `serve --tutorial` generates the
+synthetic MockMed bundle at serve time; it is not vendored. A user's compiled
+workflow is their private artifact, supplied at launch with `--bundles` and
+never embedded in the package or a registry listing. See
 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md).
 
 Machine-readable launch manifests sit at the repo root:

@@ -5,8 +5,9 @@ admission record. A missing, expired, revoked, mismatched, or unverifiable
 admission means **not actively admitted**. The validator doesn't restore an
 older admission or assign a fallback lifecycle label.
 
-`openadapt-agent` is the local agent-facing bridge for compiled
-`openadapt-flow` workflows. It exposes two complementary interfaces:
+OpenAdapt is a compiled program for repeating GUI writes that have no API, and this package is the local MCP and Agent Skill adapter that invokes that program.
+
+`openadapt-agent` exposes two complementary interfaces:
 
 1. MCP tools over local stdio.
 2. Portable Agent Skills.
@@ -78,10 +79,13 @@ attention tools use the same boundary plus typed categories, artifact
 IDs, and non-authorizing capability metadata.
 
 `--allow-run` registers one `run_workflow_<opaque-id>` tool per loadable
-workflow. Every declared parameter is required by default, and recorded
-demonstration values never enter the schema. Missing or unknown
-parameters are rejected before the subprocess starts. A per-call URL is
-accepted only if the operator separately enabled `--allow-url-override`.
+workflow. `--tutorial` generates the public synthetic MockMed bundle at
+serve time and registers `run_local_quickstart`. Every declared parameter
+is required by default, and recorded demonstration values never enter the
+schema. Missing or unknown parameters are rejected before the subprocess
+starts. A per-call URL is accepted only if the operator separately enabled
+`--allow-url-override`. The tutorial path still uses Flow's fail-closed
+`run` verb. It does not pass `--approve-unverified-writes`.
 
 Two server-start modes are intentionally separate from ordinary
 operation:
