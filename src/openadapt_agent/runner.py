@@ -153,6 +153,7 @@ class RunOutcome:
             "success": self.status == "success",
             "sealed": False,
             "requires_seal": True,
+            "frames_included": False,
             "workflow_id": self.workflow,
             "run_id": self.run_id,
             "message": public_outcome_message(self.status, self.execution_outcome),

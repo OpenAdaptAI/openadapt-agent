@@ -16,7 +16,7 @@ Serve the public synthetic tutorial with:
 ```bash
 claude mcp add openadapt -- \
   uvx --from 'openadapt-agent[tutorial]' openadapt-agent \
-  serve --tutorial --allow-run
+  serve --allow-run
 ```
 
 `openadapt quickstart --break-it` is the halt demo: the independent system-of-record check rejects a fake success banner, and the record did not change.

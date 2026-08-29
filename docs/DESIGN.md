@@ -79,8 +79,9 @@ attention tools use the same boundary plus typed categories, artifact
 IDs, and non-authorizing capability metadata.
 
 `--allow-run` registers one `run_workflow_<opaque-id>` tool per loadable
-workflow. `--tutorial` generates the public synthetic MockMed bundle at
-serve time and registers `run_local_quickstart`. Every declared parameter
+workflow. `--allow-run` with no `--bundles` generates the public synthetic
+MockMed bundle at serve time and registers `run_local_quickstart`.
+`--tutorial` is the same generator without implying run tools. Every declared parameter
 is required by default, and recorded demonstration values never enter the
 schema. Missing or unknown parameters are rejected before the subprocess
 starts. A per-call URL is accepted only if the operator separately enabled

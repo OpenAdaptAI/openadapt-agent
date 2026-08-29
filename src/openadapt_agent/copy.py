@@ -31,5 +31,5 @@ SKILL_NAME = "openadapt-gui-write"
 THREE_LINE_INSTALL = (
     "claude mcp add openadapt -- \\\n"
     "  uvx --from 'openadapt-agent[tutorial]' openadapt-agent \\\n"
-    "  serve --tutorial --allow-run"
+    "  serve --allow-run"
 )

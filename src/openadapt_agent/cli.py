@@ -48,7 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Bundle directory: either one compiled bundle, or a directory "
             "whose immediate subdirectories are bundles. Required unless "
-            "--tutorial is set."
+            "--tutorial is set, or --allow-run is set with no --bundles "
+            "(synthetic tutorial)."
         ),
     )
     p.add_argument(
@@ -57,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Generate and serve the public synthetic tutorial (MockMed). "
             "The bundle is created at serve time and is not vendored. "
+            "Implied by --allow-run when --bundles is omitted. "
             "Synthetic only. Cannot be combined with --bundles, --url, "
             "or --config."
         ),
@@ -212,14 +214,24 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    if not args.tutorial and not args.bundles:
+        if args.allow_run:
+            # Day-1 partner kit: `openadapt-agent serve --allow-run` hosts
+            # the synthetic tutorial. Registry installs still pass --bundles
+            # and stay read-only until this flag is set.
+            args.tutorial = True
+        else:
+            print(
+                "serve: provide --bundles or --tutorial "
+                "(or --allow-run for the synthetic tutorial)",
+                file=sys.stderr,
+            )
+            return 2
     if args.tutorial and (args.bundles or args.url or args.config):
         print(
             "serve: --tutorial cannot be combined with --bundles, --url, or --config",
             file=sys.stderr,
         )
-        return 2
-    if not args.tutorial and not args.bundles:
-        print("serve: provide --tutorial or --bundles", file=sys.stderr)
         return 2
 
     extra_run_args = list(args.extra_run_arg)

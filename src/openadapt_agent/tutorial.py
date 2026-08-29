@@ -88,7 +88,7 @@ def prepare_tutorial_session(
             "serve --tutorial needs the browser extra. Install with "
             "pip install 'openadapt-agent[tutorial]' or "
             "uvx --from 'openadapt-agent[tutorial]' openadapt-agent "
-            "serve --tutorial --allow-run"
+            "serve --allow-run"
         ) from exc
 
     root = Path(work_dir)

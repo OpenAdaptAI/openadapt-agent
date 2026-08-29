@@ -63,8 +63,8 @@ and [`../manifest.json`](../manifest.json).
 - **Repository:** https://github.com/OpenAdaptAI/openadapt-agent
 - **License:** MIT
 - **Transport:** stdio
-- **Run command (uvx):** `uvx --from 'openadapt-agent[tutorial]' openadapt-agent serve --tutorial --allow-run`
-- **Config:** `--tutorial` (public synthetic bundle, generated at serve time) or `--bundles` (operator's private artifact), `--runs-dir`, `--allow-run`, `--allow-attended-actions`, qualified `--config` for Continue/Skip, and optional secret `OPENADAPT_BUNDLE_KEY`
+- **Run command (uvx):** `uvx --from 'openadapt-agent[tutorial]' openadapt-agent serve --allow-run`
+- **Config:** `--allow-run` with no `--bundles` (public synthetic bundle, generated at serve time), `--tutorial` (same path without implying run tools), or `--bundles` (operator's private artifact), `--runs-dir`, `--allow-attended-actions`, qualified `--config` for Continue/Skip, and optional secret `OPENADAPT_BUNDLE_KEY`
 - **Tools:**
   - `list_workflows` / `get_workflow` — PHI-safe structural bundle projections with opaque IDs.
   - `get_run_report` — PHI-safe status and count summary; raw evidence stays local unless protected export was explicitly enabled.

@@ -416,6 +416,9 @@ class AgentBridge:
             "run_id": run_id,
             "status": status,
             "success": status == "success",
+            "sealed": False,
+            "requires_seal": True,
+            "frames_included": False,
             "message": public_outcome_message(status, execution_outcome),
             "summary": public_report_summary(report),
         }

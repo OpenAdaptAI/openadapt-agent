@@ -259,6 +259,8 @@ def test_identity_sentence_is_shared() -> None:
     assert SKILL_WHEN_TO_USE in text
     assert "name: computer-use" not in text.lower()
     assert THREE_LINE_INSTALL in README.read_text(encoding="utf-8")
+    assert "serve --tutorial --allow-run" not in THREE_LINE_INSTALL
+    assert "openadapt-agent serve --allow-run" in README.read_text(encoding="utf-8")
     assert "openadapt quickstart --break-it" in README.read_text(encoding="utf-8")
     assert "If the tool returns unsigned success, treat it as failure" in README.read_text(
         encoding="utf-8"

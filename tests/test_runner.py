@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -35,6 +36,11 @@ def test_success_mapping(monkeypatch, runner_config, bundle_dir, success_report)
     assert public["success"] is True
     assert public["sealed"] is False
     assert public["requires_seal"] is True
+    assert public["frames_included"] is False
+    blob = json.dumps(public)
+    assert ".png" not in blob
+    assert "image_data" not in blob
+    assert "screenshot_path" not in blob
     assert outcome.summary["steps_ok"] == 2
     assert outcome.report_path and outcome.report_path.endswith("report.json")
     # Governed run verb, params via file (never argv), run dir owned by us.

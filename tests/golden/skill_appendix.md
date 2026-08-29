@@ -21,7 +21,7 @@ gates) rather than the permissive `replay` demo path, and it returns a
 PHI-safe structured outcome instead of raw CLI output. Inspection and
 PHI-safe Needs Attention tools are always available; `run_<opaque-workflow-id>` exists only
 when the operator started the server with `--allow-run`. The public
-synthetic tutorial is `openadapt-agent serve --tutorial --allow-run`.
+synthetic tutorial is `openadapt-agent serve --allow-run`.
 
 ## Halt semantics (IMPORTANT)
 

@@ -16,7 +16,7 @@ Claude Code / Cursor, three lines. The server generates the public synthetic tut
 ```bash
 claude mcp add openadapt -- \
   uvx --from 'openadapt-agent[tutorial]' openadapt-agent \
-  serve --tutorial --allow-run
+  serve --allow-run
 ```
 
 `--allow-run` is an explicit opt-in. Admission stays fail-closed.
@@ -26,11 +26,12 @@ The halt demo is `openadapt quickstart --break-it`. After the verified run, the 
 Local unsigned replay is free. If the tool returns unsigned success, treat it as failure. Production success without a Seal is failure. Don't name this skill "computer use".
 
 ```bash
-python -m pip install --upgrade 'openadapt[browser]'
-openadapt quickstart --break-it
+python -m pip install --upgrade openadapt
+openadapt quickstart
+openadapt-agent serve --allow-run
 ```
 
-Python 3.10 through 3.12. `pip install openadapt-agent` is the library install if you already have a private compiled bundle.
+Python 3.10 through 3.12. `pip install openadapt` now includes this package. `pip install openadapt-agent` is the library install if you already have a private compiled bundle. The halt demo is still `openadapt quickstart --break-it`.
 
 ```bash
 uvx openadapt-agent serve --bundles /path/to/bundles          # read-only
@@ -39,10 +40,14 @@ uvx openadapt-agent serve --bundles /path/to/bundles --allow-run
 
 ## Serve a bundle
 
-`--tutorial` records, compiles, and certifies the synthetic MockMed workflow, then keeps that app up so a governed run can hit a live system of record. Private customer bundles still use `--bundles`. Those stay on the operator's disk and are never shipped in this package.
+`--allow-run` with no `--bundles` records, compiles, and certifies the
+synthetic MockMed workflow, then keeps that app up so a governed run can hit
+a live system of record. `--tutorial` is the same path without implying run
+tools. Private customer bundles still use `--bundles`. Those stay on the
+operator's disk and are never shipped in this package.
 
 ```bash
-openadapt-agent serve --tutorial --allow-run --runs-dir /tmp/openadapt-runs
+openadapt-agent serve --allow-run --runs-dir /tmp/openadapt-runs
 ```
 
 The client gets `list_workflows`, `get_workflow`, `get_run_report`,
@@ -138,7 +143,7 @@ Continue and Skip.
 | `list_needs_attention` | Always |
 | `get_attention_item` | Always |
 | `run_workflow_<opaque-id>` | `--allow-run` |
-| `run_local_quickstart` | `--tutorial --allow-run` |
+| `run_local_quickstart` | `--allow-run` with no `--bundles` |
 | `reject_attention`, `teach_attention`, `escalate_attention` | `--allow-attended-actions` |
 | `continue_attention`, `skip_attention` | `--allow-attended-actions` plus a qualified deployment `--config` |
 
@@ -221,7 +226,7 @@ Before v2 this repository wrapped model-driven GUI agents. That execution path
 now lives in `openadapt-flow`. The current name stays because the package
 bridges MCP and Agent Skills. It isn't an MCP-only package.
 
-The public capability is the server. `serve --tutorial` generates the
+The public capability is the server. `serve --allow-run` generates the
 synthetic MockMed bundle at serve time; it is not vendored. A user's compiled
 workflow is their private artifact, supplied at launch with `--bundles` and
 never embedded in the package or a registry listing. See
