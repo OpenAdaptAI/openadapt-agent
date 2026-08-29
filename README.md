@@ -23,6 +23,8 @@ claude mcp add openadapt -- \
 
 The halt demo is `openadapt quickstart --break-it`. After the verified run, the same certified bundle hits a backend that paints a success banner and rejects the write. An independent system-of-record read catches the lie. The record did not change.
 
+Local unsigned replay is free. Production success without a Seal is failure. Don't name this skill "computer use".
+
 ```bash
 python -m pip install --upgrade 'openadapt[browser]'
 openadapt quickstart --break-it

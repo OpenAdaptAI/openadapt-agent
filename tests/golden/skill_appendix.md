@@ -3,7 +3,7 @@
 
 When the user needs a repeating GUI write with no API and must prove persistence, call run_<slug>. If the tool returns HALTED, tell the user the record did not change.
 
-Never summarize halt, refused, timeout, or error as success.
+Never summarize halt, refused, timeout, or error as success. A local unsigned replay may complete. Production success without a Seal is failure.
 
 If the operator runs the local `openadapt-agent` MCP server over this
 skill's bundle directory:
@@ -44,7 +44,7 @@ A run has exactly one of these outcomes — report it faithfully:
   NOTHING was executed. The printed coverage report names the failing
   gate.
 
-Never summarize halt, refused, timeout, or error as success.
+Never summarize halt, refused, timeout, or error as success. A local unsigned replay may complete. Production success without a Seal is failure.
 
 ## Needs Attention
 

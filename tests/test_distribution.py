@@ -258,3 +258,22 @@ def test_identity_sentence_is_shared() -> None:
     assert "name: computer-use" not in text.lower()
     assert THREE_LINE_INSTALL in README.read_text(encoding="utf-8")
     assert "openadapt quickstart --break-it" in README.read_text(encoding="utf-8")
+    assert "Production success without a Seal is failure" in README.read_text(
+        encoding="utf-8"
+    )
+    assert "name: computer-use" not in README.read_text(encoding="utf-8").lower()
+
+
+def test_mcpb_checker_allows_skill_markdown_not_bundles() -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "check_mcpb", REPO_ROOT / "scripts" / "check_mcpb.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module._is_skill_markdown("skills/openadapt-gui-write/SKILL.md")
+    assert not module._is_skill_markdown(
+        "skills/openadapt-gui-write/bundle/workflow.json"
+    )
