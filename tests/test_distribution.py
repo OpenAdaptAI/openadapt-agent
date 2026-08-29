@@ -248,6 +248,8 @@ def _readme_first_paragraph() -> str:
 
 
 def test_identity_sentence_is_shared() -> None:
+    # MCP registry server.json description maxLength is 100.
+    assert len(IDENTITY_SENTENCE) <= 100
     assert _readme_first_paragraph() == IDENTITY_SENTENCE
     assert IDENTITY_SENTENCE == _server_json()["description"]
     assert IDENTITY_SENTENCE in LLMS_TXT.read_text(encoding="utf-8")

@@ -5,7 +5,7 @@ admission record. A missing, expired, revoked, mismatched, or unverifiable
 admission means **not actively admitted**. The validator doesn't restore an
 older admission or assign a fallback lifecycle label.
 
-OpenAdapt is a compiled program for repeating GUI writes that have no API, and this package is the local MCP and Agent Skill adapter that invokes that program.
+OpenAdapt is a compiled program for GUI writes with no API. This package invokes it over MCP.
 
 `openadapt-agent` exposes two complementary interfaces:
 

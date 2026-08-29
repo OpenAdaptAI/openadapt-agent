@@ -1,6 +1,6 @@
 ---
 name: openadapt-gui-write
-description: "OpenAdapt is a compiled program for repeating GUI writes that have no API, and this package is the local MCP and Agent Skill adapter that invokes that program."
+description: "OpenAdapt is a compiled program for GUI writes with no API. This package invokes it over MCP."
 ---
 
 # OpenAdapt GUI write

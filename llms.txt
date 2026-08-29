@@ -1,6 +1,6 @@
 # openadapt-agent
 
-> OpenAdapt is a compiled program for repeating GUI writes that have no API, and this package is the local MCP and Agent Skill adapter that invokes that program.
+> OpenAdapt is a compiled program for GUI writes with no API. This package invokes it over MCP.
 
 ## What it provides
 

@@ -5,7 +5,7 @@
 
 `mcp-name: io.github.OpenAdaptAI/openadapt-agent`
 
-OpenAdapt is a compiled program for repeating GUI writes that have no API, and this package is the local MCP and Agent Skill adapter that invokes that program.
+OpenAdapt is a compiled program for GUI writes with no API. This package invokes it over MCP.
 
 Flow still runs the program. Policy, identity, verification, pauses, repair, and audit stay in [`openadapt-flow`](https://github.com/OpenAdaptAI/openadapt-flow). A healthy call goes through Flow's governed `run`. HALTED, refused, timeout, and error come back as those outcomes. Don't summarize any of them as success.
 
