@@ -19,9 +19,12 @@ SKILL_WHEN_TO_USE = (
 
 SKILL_HONESTY = (
     "Never summarize halt, refused, timeout, or error as success. "
-    "A local unsigned replay may complete. Production success without a Seal "
-    "is failure."
+    "A local unsigned replay may complete. If the tool returns unsigned "
+    "success, treat it as failure. Production success without a Seal is "
+    "failure."
 )
+
+REQUIRES_SEAL_META = {"requires_seal": True}
 
 SKILL_NAME = "openadapt-gui-write"
 

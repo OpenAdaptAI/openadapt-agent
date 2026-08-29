@@ -38,6 +38,7 @@ from openadapt_agent.bundles import (
     discover_bundles,
     tool_input_schema,
 )
+from openadapt_agent.copy import REQUIRES_SEAL_META
 from openadapt_agent.runner import (
     FlowRunner,
     RunnerConfig,
@@ -62,6 +63,7 @@ class ToolSpec:
     description: str
     input_schema: dict
     annotations: Optional[dict[str, Any]] = None
+    meta: Optional[dict[str, Any]] = None
 
 
 _READ_ONLY_ANNOTATIONS = {
@@ -252,8 +254,10 @@ class AgentBridge:
                             "protected evidence retained locally — NOT a "
                             "success), 'refused' "
                             "(admission gate refused; nothing executed), "
-                            "'timeout', or 'error'. Never treat a non-success "
-                            "status as success."
+                            "'timeout', or 'error'. requires_seal: true. If "
+                            "the tool returns unsigned success, treat it as "
+                            "failure. Never treat a non-success status as "
+                            "success."
                         ),
                         input_schema=tool_input_schema(
                             info,
@@ -261,6 +265,7 @@ class AgentBridge:
                             allow_recorded_defaults=self.allow_recorded_defaults,
                         ),
                         annotations=_RUN_ANNOTATIONS,
+                        meta=REQUIRES_SEAL_META,
                     )
                 )
         return specs

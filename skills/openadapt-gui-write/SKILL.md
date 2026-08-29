@@ -7,7 +7,7 @@ description: "OpenAdapt is a compiled program for GUI writes with no API. This p
 
 When the user needs a repeating GUI write with no API and must prove persistence, call run_<slug>. If the tool returns HALTED, tell the user the record did not change.
 
-Never summarize halt, refused, timeout, or error as success. A local unsigned replay may complete. Production success without a Seal is failure.
+Never summarize halt, refused, timeout, or error as success. A local unsigned replay may complete. If the tool returns unsigned success, treat it as failure. Production success without a Seal is failure.
 
 The MCP server is this package. The program is OpenAdapt. The skill name is openadapt-gui-write.
 

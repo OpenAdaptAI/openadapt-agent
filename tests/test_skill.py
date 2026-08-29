@@ -50,6 +50,7 @@ def test_appendix_names_the_mcp_tool_and_params(bundle_dir, tmp_path):
     assert "Earlier run actions may have effects" in text
     assert SKILL_WHEN_TO_USE in text
     assert SKILL_HONESTY in text
+    assert "If the tool returns unsigned success, treat it as failure" in text
     assert IDENTITY_SENTENCE in text
     assert "name: computer-use" not in text.lower()
     assert text.split("---", 2)[1].count(IDENTITY_SENTENCE) == 1

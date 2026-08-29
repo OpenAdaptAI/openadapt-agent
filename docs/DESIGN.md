@@ -113,9 +113,15 @@ For a precise Flow report, the bridge reports success only when all conditions h
 1. Flow exits with code 0.
 2. The persisted report has `execution_outcome: VERIFIED`.
 3. The persisted report has a consistent `success: true` value.
+4. The report is not production-eligible. Local MCP never mints a Seal,
+   so production-eligible `VERIFIED` is unsigned success and is failure.
+
+Write tools advertise `requires_seal: true` on MCP `_meta`. If the tool
+returns unsigned success, treat it as failure.
 
 For a legacy report without `execution_outcome`, the bridge preserves the
-compatible rule: exit code 0 plus `success: true`.
+compatible rule: exit code 0 plus `success: true`. Local unsigned replay
+is free. Production success without a Seal is failure.
 
 Exit 1 is a halt. Exit 2 is a governed refusal before execution. A
 timeout is explicitly uncertain rather than a rollback. Report evidence

@@ -56,6 +56,8 @@ def test_schema_uses_opaque_id_requires_params_and_exports_no_examples(
     workflow = workflow_id(bridge)
     assert re.fullmatch(r"workflow_[0-9a-f]{24}", workflow)
     spec = {item.name: item for item in bridge.list_tool_specs()}[f"run_{workflow}"]
+    assert spec.meta == {"requires_seal": True}
+    assert "requires_seal: true" in spec.description
     schema = spec.input_schema
     assert schema["type"] == "object"
     assert schema["additionalProperties"] is False

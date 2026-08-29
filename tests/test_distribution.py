@@ -260,6 +260,9 @@ def test_identity_sentence_is_shared() -> None:
     assert "name: computer-use" not in text.lower()
     assert THREE_LINE_INSTALL in README.read_text(encoding="utf-8")
     assert "openadapt quickstart --break-it" in README.read_text(encoding="utf-8")
+    assert "If the tool returns unsigned success, treat it as failure" in README.read_text(
+        encoding="utf-8"
+    )
     assert "Production success without a Seal is failure" in README.read_text(
         encoding="utf-8"
     )
