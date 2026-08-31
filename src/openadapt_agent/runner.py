@@ -501,6 +501,7 @@ class FlowRunner:
             try:
                 proc = subprocess.run(
                     cmd,
+                    stdin=subprocess.DEVNULL,
                     capture_output=True,
                     text=True,
                     timeout=self.config.timeout_s,
@@ -591,7 +592,11 @@ class FlowRunner:
             cmd += ["--config", self.config.deployment_config]
         try:
             proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=self.config.timeout_s
+                cmd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=self.config.timeout_s,
             )
         except subprocess.TimeoutExpired:
             return {"certified": None, "detail": "certify timed out"}

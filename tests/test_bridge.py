@@ -438,6 +438,7 @@ def test_certify_result_is_fixed_copy_unless_protected_export_enabled(
     cmd = stub.calls[0]
     assert cmd[1] == "certify"
     assert cmd[cmd.index("--policy") + 1] == "clinical-write"
+    assert stub.stdins == [runner_mod.subprocess.DEVNULL]
 
 
 def test_workflow_names_intents_recorded_values_and_paths_never_default_export(

@@ -67,13 +67,15 @@ class FlowCliStub:
         self.exit_code = exit_code
         self.report = report
         self.calls: list[list[str]] = []
+        self.stdins: list[object] = []
         self.stdout = "stub stdout"
         self.stderr = ""
 
-    def __call__(self, cmd, capture_output=True, text=True, timeout=None):
+    def __call__(self, cmd, stdin=None, capture_output=True, text=True, timeout=None):
         import subprocess
 
         self.calls.append(list(cmd))
+        self.stdins.append(stdin)
         if "--run-dir" in cmd:
             run_dir = Path(cmd[cmd.index("--run-dir") + 1])
             run_dir.mkdir(parents=True, exist_ok=True)

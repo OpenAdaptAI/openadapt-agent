@@ -48,6 +48,7 @@ def test_success_mapping(monkeypatch, runner_config, bundle_dir, success_report)
     assert cmd[0] == "openadapt-flow-stub" and cmd[1] == "run"
     assert "--params-file" in cmd and "--run-dir" in cmd
     assert "hello" not in " ".join(cmd)
+    assert stub.stdins == [subprocess.DEVNULL]
 
 
 def test_halt_maps_to_structured_halt_not_success(
@@ -259,7 +260,7 @@ def test_exit_two_is_governed_refusal(monkeypatch, runner_config, bundle_dir):
 
 
 def test_timeout_maps_to_timeout(monkeypatch, runner_config, bundle_dir):
-    def raise_timeout(cmd, capture_output=True, text=True, timeout=None):
+    def raise_timeout(cmd, stdin=None, capture_output=True, text=True, timeout=None):
         raise subprocess.TimeoutExpired(cmd, timeout, output=b"partial", stderr=b"")
 
     outcome = _run(monkeypatch, runner_config, raise_timeout, bundle_dir=bundle_dir)
@@ -269,7 +270,7 @@ def test_timeout_maps_to_timeout(monkeypatch, runner_config, bundle_dir):
 
 
 def test_missing_cli_maps_to_error(monkeypatch, runner_config, bundle_dir):
-    def raise_missing(cmd, capture_output=True, text=True, timeout=None):
+    def raise_missing(cmd, stdin=None, capture_output=True, text=True, timeout=None):
         raise FileNotFoundError(cmd[0])
 
     outcome = _run(monkeypatch, runner_config, raise_missing, bundle_dir=bundle_dir)
