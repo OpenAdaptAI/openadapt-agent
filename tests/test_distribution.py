@@ -163,6 +163,9 @@ def test_serve_is_the_subcommand_and_bundles_is_required() -> None:
     assert any(a.get("value") == "serve" for a in positional)
     assert "--bundles" in named
     assert named["--bundles"]["isRequired"] is True
+    assert "--authoring" not in named
+    assert not any(a.get("value") == "--authoring" for a in args)
+    assert _server_json()["packages"][0]["transport"]["type"] == "stdio"
 
 
 def test_registry_launch_is_read_only_by_default() -> None:

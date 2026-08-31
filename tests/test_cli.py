@@ -81,8 +81,82 @@ def test_serve_requires_tutorial_or_bundles(capsys):
     result = main(["serve"])
     assert result == 2
     err = capsys.readouterr().err
-    assert "provide --bundles or --tutorial" in err
+    assert "provide --bundles, --tutorial, or --authoring" in err
     assert "--allow-run" in err
+
+
+def test_authoring_flag_does_not_require_bundles_or_imply_allow_run(tmp_path):
+    args = build_parser().parse_args(
+        ["serve", "--authoring", "--runs-dir", str(tmp_path / "runs")]
+    )
+    assert args.authoring is True
+    assert args.bundles is None
+    assert args.allow_run is False
+    assert args.tutorial is False
+
+
+def test_authoring_help_says_run_tools_stay_off_and_stdio_only(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        build_parser().parse_args(["serve", "--help"])
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "--authoring" in out
+    assert "Does not enable run tools" in out
+    assert "HTTP" in out
+
+
+def test_authoring_does_not_imply_allow_run_without_bundles(capsys):
+    result = main(["serve", "--authoring", "--allow-run"])
+    assert result == 2
+    err = capsys.readouterr().err
+    assert "does not imply --allow-run" in err
+    assert "requires --bundles" in err
+
+
+def test_authoring_cannot_combine_with_tutorial(capsys):
+    result = main(["serve", "--authoring", "--tutorial"])
+    assert result == 2
+    assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_authoring_without_flow_session_fails_closed(capsys, monkeypatch):
+    def missing(**kwargs):
+        from openadapt_agent.authoring import AuthoringError
+
+        raise AuthoringError("openadapt_flow.authoring is not available")
+
+    monkeypatch.setattr("openadapt_agent.authoring.open_authoring_session", missing)
+    result = main(["serve", "--authoring"])
+    assert result == 2
+    assert "openadapt_flow.authoring" in capsys.readouterr().err
+
+
+def test_authoring_serve_registers_probe_tools_without_run(monkeypatch, capsys):
+    from test_authoring import FakeAuthoringSession
+
+    captured: dict = {}
+
+    def fake_session(**kwargs):
+        return FakeAuthoringSession()
+
+    def fake_serve(bridge, authoring=None):
+        captured["bridge"] = bridge
+        captured["authoring"] = authoring
+
+    monkeypatch.setattr("openadapt_agent.authoring.open_authoring_session", fake_session)
+    monkeypatch.setattr("openadapt_agent.mcp.serve", fake_serve)
+
+    result = main(["serve", "--authoring"])
+    assert result == 0
+    assert captured["bridge"] is None
+    authoring = captured["authoring"]
+    names = [spec.name for spec in authoring.list_tool_specs()]
+    assert names[:4] == ["observe", "start_record", "click", "halt"]
+    assert "type" in names
+    err = capsys.readouterr().err
+    assert "authoring tools enabled" in err
+    assert "run tools disabled" in err
+    assert "does not imply --allow-run" in err
 
 
 def test_tutorial_rejects_private_bundle_path(tmp_path, capsys):

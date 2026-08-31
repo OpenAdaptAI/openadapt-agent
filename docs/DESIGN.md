@@ -40,21 +40,24 @@ MCP client / Agent Skill
           │
           │ local stdio + exact JSON schemas
           ▼
-openadapt_agent.mcp
+openadapt_agent.mcp          (local stdio only; HTTP shim forbidden)
           │
-          ▼
-openadapt_agent.bridge
-   ├── bundle discovery and typed run tools
-   ├── PHI-safe Needs Attention projection
-   ├── action-specific operator decisions
-   └── structured success / halt / refusal results
+          ├── openadapt_agent.bridge
+          │     ├── bundle discovery and typed run tools
+          │     ├── PHI-safe Needs Attention projection
+          │     ├── action-specific operator decisions
+          │     └── structured success / halt / refusal results
+          │           │
+          │           ├── new run ──► openadapt-flow run subprocess
+          │           └── attended ─► openadapt-flow durable API
           │
-          ├── new run ──────────────► openadapt-flow run subprocess
-          │                           fail-closed admission + execution
-          │
-          └── attended decision ────► openadapt-flow durable API
-                                      signed capability + idempotency
-                                      + live revalidation + audit
+          └── openadapt_agent.authoring   (--authoring first demo)
+                observe / start_record / click / halt
+                local type (agent-driven Recorder.type_text)
+                pause Continue → record_observed (never type_text)
+                      │
+                      ▼
+                openadapt_flow.authoring.AuthoringSession
 ```
 
 The MCP adapter is intentionally thin. Tool descriptions and dispatch
@@ -119,6 +122,30 @@ operation:
 `--allow-attended-actions` registers Reject, Teach, and Escalate. Continue and
 Skip are registered only when a deployment configuration lets Flow
 construct its bound live executor.
+
+`--authoring` registers first-demo tools over the same local stdio
+server. Probe names match hosted MCP: `observe`, `start_record`,
+`click`, `halt`. Local stdio may also include `type` for agent-driven
+typing through Flow's Recorder. Hosted MCP remains pause-only. Human
+type during `pause_for_input` is persisted with `Recorder.record_observed`
+on the pause-target node, never `type_text`. `compile` wraps Flow
+`compile_recording` and returns `needs_human_admit`; an agent click never
+paints `VERIFIED`.
+
+`--authoring` does not imply `--allow-run`. `--bundles` is optional iff
+`--authoring` (or the existing `--tutorial` / implied-tutorial path). The
+published run recipe in `server.json` still requires `--bundles` and
+stays `transport: stdio`. Authoring is a first demo; there is no bundle
+yet.
+
+Observe is a fail-closed PHI projection (`openadapt.authoring.observe/v1`):
+no `value`, `text`, window `title`, screenshot, OCR, URL, or backend
+pixels. Windows native, Citrix, and RDP are `COACH_ONLY` in v1.
+
+The session object is Flow's public `openadapt_flow.authoring` module.
+Until that module is importable, `serve --authoring` fails closed with
+an explicit dependency error. Tests cover the tool surface with a fake
+session.
 
 ## Governed runs
 
@@ -273,9 +300,13 @@ caller-controlled `USERNAME` environment variable. A blank operator
 identity fails closed.
 
 This process must not be port-forwarded or exposed as an unauthenticated
-network service. OpenAdapt Cloud owns remote authentication,
+network service. An HTTP / Streamable-HTTP shim in this MIT package
+remains forbidden, including when `--authoring` is set. Remote authoring
+for ChatGPT.com / Claude.ai is a website mailbox, not a listener inside
+`openadapt-agent`. OpenAdapt Cloud owns remote authentication,
 multi-tenancy, tenant-scoped authorization, fleet policy, and managed
-transport.
+transport. `--authoring` does not add those, and it does not imply
+`--allow-run`.
 
 ## Dependency boundary
 
@@ -309,7 +340,12 @@ Tests cover:
 - compatibility with Flow's public, thread-owned attended service;
 - success/halt/refusal/timeout outcome mapping;
 - MCP serialization and thread ownership;
-- Agent Skill emission.
+- Agent Skill emission;
+- `--authoring` probe tools (`observe`, `start_record`, `click`, `halt`)
+  and local `type`; observe projection drops values/titles/screenshots;
+  pause Continue uses `record_observed` rather than `type_text`;
+  compile returns `needs_human_admit`; `--authoring` does not enable
+  run tools; `server.json` stays stdio with `--bundles` required.
 
 CI runs on Python 3.10, 3.11, and 3.12. It also builds the wheel and
 sdist, verifies MIT metadata and license inclusion, and refuses package
