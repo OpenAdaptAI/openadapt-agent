@@ -142,10 +142,17 @@ Observe is a fail-closed PHI projection (`openadapt.authoring.observe/v1`):
 no `value`, `text`, window `title`, screenshot, OCR, URL, or backend
 pixels. Windows native, Citrix, and RDP are `COACH_ONLY` in v1.
 
-The session object is Flow's public `openadapt_flow.authoring` module.
-Until that module is importable, `serve --authoring` fails closed with
-an explicit dependency error. Tests cover the tool surface with a fake
-session.
+The session object is Flow's public `openadapt_flow.authoring` module
+(`AuthoringSession(backend, out_dir, backend_kind=…)` when F1 is
+importable). Until that module is importable, `serve --authoring` fails
+closed with an explicit dependency error. Windows native, Citrix, and
+RDP construct a coach-only stand-in and never spawn `win_agent`. Observe
+is fail-closed to the T1 wire (`additionalProperties: false`, node ids
+`n_` + 8 hex, 200 nodes / 32 KiB). Capture's projector is used when
+importable. If Desktop has advertised authoring IPC, overlay stays
+Desktop-owned; this package does not speak the D2 protocol or open an
+HTTP client. Tests cover the tool surface with a fake session and an
+F1-shaped session.
 
 ## Governed runs
 
@@ -342,8 +349,9 @@ Tests cover:
 - MCP serialization and thread ownership;
 - Agent Skill emission;
 - `--authoring` probe tools (`observe`, `start_record`, `click`, `halt`)
-  and local `type`; observe projection drops values/titles/screenshots;
-  pause Continue uses `record_observed` rather than `type_text`;
+  and local `type`; observe projection drops values/titles/screenshots
+  and extra keys, caps the wire at 32 KiB, and uses `n_` + 8 hex node
+  ids; pause Continue uses `record_observed` rather than `type_text`;
   compile returns `needs_human_admit`; `--authoring` does not enable
   run tools; `server.json` stays stdio with `--bundles` required.
 

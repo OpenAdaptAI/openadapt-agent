@@ -42,6 +42,23 @@ uvx openadapt-agent serve --bundles /path/to/bundles          # read-only
 uvx openadapt-agent serve --bundles /path/to/bundles --allow-run
 ```
 
+## Author a first demo (Claude Code)
+
+Local Claude Code (or Cursor, Codex, Grok CLI) is the first authoring UI.
+Hosted ChatGPT.com / Claude.ai MCP is a website mailbox, not a listener in
+this package.
+
+```bash
+claude mcp add openadapt-authoring -- \
+  uvx --from 'openadapt-agent[tutorial]' openadapt-agent \
+  serve --authoring
+```
+
+`--bundles` is omitted. Probe tools are `observe`, `start_record`, `click`,
+and `halt`. `--authoring` does not enable run tools. This process stays
+stdio. Pass `--url` to pin a fresh Playwright Chromium with empty cookies.
+Windows native, Citrix, and RDP are coach-only in v1.
+
 ## Serve a bundle
 
 `--allow-run` with no `--bundles` records, compiles, and certifies the
@@ -150,6 +167,7 @@ Continue and Skip.
 | `run_local_quickstart` | `--allow-run` with no `--bundles` |
 | `reject_attention`, `teach_attention`, `escalate_attention` | `--allow-attended-actions` |
 | `continue_attention`, `skip_attention` | `--allow-attended-actions` plus a qualified deployment `--config` |
+| `observe`, `start_record`, `click`, `halt` | `--authoring` |
 
 ## Run outcomes
 

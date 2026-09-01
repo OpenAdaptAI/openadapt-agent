@@ -60,9 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Register first-demo authoring tools over local stdio: observe, "
-            "start_record, click, halt. Local stdio may also type through the "
-            "recorder; hosted MCP remains pause-only. Does not enable run "
-            "tools. This process stays stdio and must not be served over HTTP."
+            "start_record, click, halt. Local Claude Code path is the first "
+            "authoring UI. Pass --url to pin Playwright Chromium with empty "
+            "cookies. Local stdio may also type through the recorder; hosted "
+            "MCP remains pause-only. Does not enable run tools. This process "
+            "stays stdio and must not be served over HTTP."
         ),
     )
     p.add_argument(
@@ -270,8 +272,16 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             from openadapt_agent.authoring import AuthoringBridge, AuthoringError
             from openadapt_agent.authoring import open_authoring_session
 
+            authoring_dir = Path(args.runs_dir).expanduser().resolve() / "authoring"
             try:
-                authoring_bridge = AuthoringBridge(open_authoring_session())
+                authoring_bridge = AuthoringBridge(
+                    open_authoring_session(
+                        out_dir=authoring_dir,
+                        url=args.url,
+                        headed=args.headed,
+                    ),
+                    out_dir=authoring_dir,
+                )
             except AuthoringError as exc:
                 print(f"serve: {exc}", file=sys.stderr)
                 return 2
@@ -355,6 +365,10 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     finally:
         if tutorial_session is not None:
             tutorial_session.close()
+        if authoring_bridge is not None:
+            closer = getattr(authoring_bridge.session, "close", None)
+            if callable(closer):
+                closer()
     return 0
 
 
