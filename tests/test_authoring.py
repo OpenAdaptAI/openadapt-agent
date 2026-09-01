@@ -361,7 +361,7 @@ def test_open_authoring_session_notes_flow_dependency_when_missing(monkeypatch):
 
 def test_authoring_sources_stay_stdio_without_http_listener():
     root = Path(__file__).resolve().parents[1] / "src" / "openadapt_agent"
-    for name in ("authoring.py", "mcp.py", "cli.py"):
+    for name in ("authoring.py", "mcp.py", "cli.py", "mailbox.py", "runner_bind.py"):
         text = (root / name).read_text(encoding="utf-8")
         assert "HTTPServer" not in text
         assert "uvicorn" not in text

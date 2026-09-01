@@ -6,10 +6,11 @@ stdio may also include ``type`` for agent-driven typing through Flow's
 Recorder. Hosted remains pause-only. Human type during a pause is
 ``record_observed`` everywhere; never ``type_text`` on the pause target.
 
-This module is a transport-independent bridge. It does not open a network
-listener and does not implement a remote mailbox. Window titles, field
-values, screenshots, and backend pixels never cross the MCP wire.
-``--authoring`` does not imply ``--allow-run``.
+This module is a transport-independent stdio bridge. It does not open a
+network listener. Hosted ChatGPT.com uses ``openadapt-agent authoring
+connect`` (outbound mailbox poll in :mod:`openadapt_agent.mailbox`).
+Window titles, field values, screenshots, and backend pixels never
+cross the MCP wire. ``--authoring`` does not imply ``--allow-run``.
 
 Deps F1/C1/T1 are not required to be merged: Flow's ``AuthoringSession``
 is constructed when importable; Capture's projector is used when
@@ -265,8 +266,9 @@ class CoachOnlySession:
 def discover_desktop_authoring_ipc(*, home: Optional[Path] = None) -> Optional[dict[str, Any]]:
     """Return Desktop authoring IPC discovery when D2 has advertised it.
 
-    Overlay and Allow stay Desktop-owned. This package does not open an HTTP
-    client or mailbox listener. Until D2 publishes an authoring endpoint in
+    Overlay stays Desktop-owned. Stdio ``--authoring`` does not speak D2.
+    Hosted ChatGPT.com uses :mod:`openadapt_agent.mailbox` (outbound poll).
+    Until D2 publishes an authoring endpoint in
     ``~/.openadapt/desktop_ipc.json``, return None and pin a local Flow session.
     """
 

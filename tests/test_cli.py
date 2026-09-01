@@ -131,6 +131,58 @@ def test_authoring_without_flow_session_fails_closed(capsys, monkeypatch):
     assert "openadapt_flow.authoring" in capsys.readouterr().err
 
 
+def test_authoring_connect_parses_runner_link_and_url():
+    args = build_parser().parse_args(
+        [
+            "authoring",
+            "connect",
+            "openadapt://runner?pack=p.abcdefghijkl&bind=oab_"
+            + "A" * 43
+            + "&origin=https://openadapt.ai",
+            "--url",
+            "https://example.invalid/app",
+            "--headed",
+        ]
+    )
+    assert args.authoring_command == "connect"
+    assert args.url == "https://example.invalid/app"
+    assert args.headed is True
+
+
+def test_authoring_connect_runs_mailbox(monkeypatch):
+    captured: dict = {}
+
+    def fake_connect(target, **kwargs):
+        captured["target"] = target
+        captured["kwargs"] = kwargs
+        return 0
+
+    monkeypatch.setattr("openadapt_agent.mailbox.connect_mailbox", fake_connect)
+    result = main(
+        [
+            "authoring",
+            "connect",
+            "openadapt://runner?pack=p.abcdefghijkl&bind=oab_"
+            + "A" * 43
+            + "&origin=https://openadapt.ai",
+        ]
+    )
+    assert result == 0
+    assert captured["target"].startswith("openadapt://runner")
+
+
+def test_authoring_connect_reports_mailbox_errors(monkeypatch, capsys):
+    def fake_connect(target, **kwargs):
+        from openadapt_agent.mailbox import MailboxError
+
+        raise MailboxError("Bind token is malformed")
+
+    monkeypatch.setattr("openadapt_agent.mailbox.connect_mailbox", fake_connect)
+    result = main(["authoring", "connect", "https://openadapt.ai/j/p.abcdefghijkl"])
+    assert result == 2
+    assert "malformed" in capsys.readouterr().err
+
+
 def test_authoring_serve_registers_probe_tools_without_run(monkeypatch, capsys):
     from test_authoring import FakeAuthoringSession
 

@@ -7,11 +7,14 @@ Subcommands:
   workflow runs and attended decisions require separate operator flags.
   ``--authoring`` adds first-demo stdio tools and does not imply
   ``--allow-run``.
+- ``authoring connect`` — outbound mailbox client for hosted ChatGPT.com /
+  Claude.ai (claim ``oab_``, poll wait=0, Allow-per-sub). Not an HTTP
+  listener. Overlay chrome stays Desktop-only.
 - ``emit-skill`` — emit a Claude Agent Skill folder for one bundle
   (wraps ``openadapt-flow emit-skill`` and appends MCP + halt guidance).
 
-The bridge is local stdio. Remote identity, tenancy, and transport are provided
-by OpenAdapt Cloud rather than added to this process.
+``serve`` stays local stdio. Hosted ChatGPT.com reaches this computer through
+``authoring connect`` (outbound HTTPS), not a port-forwarded MCP server.
 """
 
 from __future__ import annotations
@@ -193,6 +196,49 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.set_defaults(func=_cmd_serve)
+
+    authoring = sub.add_parser(
+        "authoring",
+        help=(
+            "Hosted authoring mailbox client (ChatGPT.com / Claude.ai). "
+            "Outbound HTTPS only; not an HTTP listener."
+        ),
+    )
+    authoring_sub = authoring.add_subparsers(dest="authoring_command", required=True)
+    connect = authoring_sub.add_parser(
+        "connect",
+        help=(
+            "Claim an openadapt://runner link or pack URL, poll wait=0, "
+            "and prompt Allow per chat account"
+        ),
+        description=(
+            "Claim an openadapt://runner link or pack URL, poll wait=0, "
+            "and prompt Allow per chat account. Overlay chrome stays "
+            "Desktop-only. Continue uses record_observed; it does not type "
+            "secrets. This process only makes outbound HTTPS."
+        ),
+    )
+    connect.add_argument(
+        "target",
+        help=(
+            "openadapt://runner?pack=…&bind=oab_…&origin=https://openadapt.ai "
+            "or https://openadapt.ai/j/{id} (bind required to claim)"
+        ),
+    )
+    connect.add_argument(
+        "--url",
+        default=None,
+        help=(
+            "Launch Playwright Chromium with empty cookies at this URL. "
+            "Not the browser you are already signed into."
+        ),
+    )
+    connect.add_argument(
+        "--headed",
+        action="store_true",
+        help="Keep the Playwright window visible (required to sign in in the app).",
+    )
+    connect.set_defaults(func=_cmd_authoring_connect)
 
     p = sub.add_parser(
         "emit-skill",
@@ -378,6 +424,20 @@ def _serve(serve, bridge, authoring):
         serve(bridge)
         return
     serve(bridge, authoring=authoring)
+
+
+def _cmd_authoring_connect(args: argparse.Namespace) -> int:
+    from openadapt_agent.mailbox import MailboxError, connect_mailbox
+
+    try:
+        return connect_mailbox(
+            args.target,
+            url=args.url,
+            headed=args.headed,
+        )
+    except MailboxError as exc:
+        print(f"authoring connect: {exc}", file=sys.stderr)
+        return 2
 
 
 def _cmd_emit_skill(args: argparse.Namespace) -> int:

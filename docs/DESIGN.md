@@ -51,13 +51,19 @@ openadapt_agent.mcp          (local stdio only; HTTP shim forbidden)
           │           ├── new run ──► openadapt-flow run subprocess
           │           └── attended ─► openadapt-flow durable API
           │
-          └── openadapt_agent.authoring   (--authoring first demo)
-                observe / start_record / click / halt
-                local type (agent-driven Recorder.type_text)
-                pause Continue → record_observed (never type_text)
-                      │
-                      ▼
-                openadapt_flow.authoring.AuthoringSession
+          ├── openadapt_agent.authoring   (--authoring first demo, stdio)
+          │     observe / start_record / click / halt
+          │     local type (agent-driven Recorder.type_text)
+          │     pause Continue → record_observed (never type_text)
+          │           │
+          │           ▼
+          │     openadapt_flow.authoring.AuthoringSession
+          │
+          └── openadapt_agent.mailbox     (authoring connect, outbound HTTPS)
+                parse openadapt://runner / pack URL
+                POST claim oab_ → poll wait=0 → Allow-per-sub
+                Continue → record_observed (never type_text)
+                overlay chrome stays Desktop-only
 ```
 
 The MCP adapter is intentionally thin. Tool descriptions and dispatch
@@ -150,9 +156,10 @@ RDP construct a coach-only stand-in and never spawn `win_agent`. Observe
 is fail-closed to the T1 wire (`additionalProperties: false`, node ids
 `n_` + 8 hex, 200 nodes / 32 KiB). Capture's projector is used when
 importable. If Desktop has advertised authoring IPC, overlay stays
-Desktop-owned; this package does not speak the D2 protocol or open an
-HTTP client. Tests cover the tool surface with a fake session and an
-F1-shaped session.
+Desktop-owned; stdio `--authoring` does not speak the D2 protocol.
+`authoring connect` is the outbound mailbox client for hosted chat apps.
+Tests cover the stdio tool surface with a fake session and an F1-shaped
+session, and the mailbox client against a mocked wait=0 poll.
 
 ## Governed runs
 
@@ -307,12 +314,16 @@ caller-controlled `USERNAME` environment variable. A blank operator
 identity fails closed.
 
 This process must not be port-forwarded or exposed as an unauthenticated
-network service. An HTTP / Streamable-HTTP shim in this MIT package
-remains forbidden, including when `--authoring` is set. Remote authoring
-for ChatGPT.com / Claude.ai is a website mailbox, not a listener inside
-`openadapt-agent`. OpenAdapt Cloud owns remote authentication,
+network service. An HTTP / Streamable-HTTP **listener** in this MIT package
+remains forbidden, including when `--authoring` is set. Hosted ChatGPT.com
+/ Claude.ai cannot talk to localhost. Pip users run `openadapt-agent
+authoring connect` — an **outbound** mailbox client (claim `oab_`, poll
+`wait_seconds: 0`, Allow-per-`sub`) copied from Desktop
+`engine/authoring_runner.py` when that engine is not importable. Overlay
+chrome, launchd, and the `openadapt://` URL handler stay Desktop-only.
+See `docs/MAILBOX_CLI.md`. OpenAdapt Cloud owns remote authentication,
 multi-tenancy, tenant-scoped authorization, fleet policy, and managed
-transport. `--authoring` does not add those, and it does not imply
+execute. `--authoring` does not add those, and it does not imply
 `--allow-run`.
 
 ## Dependency boundary
@@ -353,7 +364,10 @@ Tests cover:
   and extra keys, caps the wire at 32 KiB, and uses `n_` + 8 hex node
   ids; pause Continue uses `record_observed` rather than `type_text`;
   compile returns `needs_human_admit`; `--authoring` does not enable
-  run tools; `server.json` stays stdio with `--bundles` required.
+  run tools; `server.json` stays stdio with `--bundles` required;
+  `authoring connect` parses `openadapt://runner` / pack URLs, claims
+  `oab_`, polls `wait_seconds: 0`, prompts Allow-per-`sub`, and Continue
+  uses `record_observed` (never `type_text`).
 
 CI runs on Python 3.10, 3.11, and 3.12. It also builds the wheel and
 sdist, verifies MIT metadata and license inclusion, and refuses package
