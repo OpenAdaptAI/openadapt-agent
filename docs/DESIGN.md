@@ -5,7 +5,17 @@ admission record. A missing, expired, revoked, mismatched, or unverifiable
 admission means **not actively admitted**. The validator doesn't restore an
 older admission or assign a fallback lifecycle label.
 
-OpenAdapt is a compiled program for GUI writes with no API. This package invokes it over MCP.
+The live target ledger is
+https://openadapt.ai/production-lifecycle.json. It currently has seven
+target admissions. Evidence class is `remote-safe-synthetic`. The live
+workflow ledger is
+https://openadapt.ai/production-workflow-admissions.json. It currently
+lists seven synthetic admissions (`0.0.0-synthetic`). That isn't a
+customer job. Standard and Regulated need an active workflow admission
+for the exact bundle version. Demo and the synthetic tutorial may run
+without one.
+
+OpenAdapt compiles demonstrated GUI workflows into programs. This package invokes them over MCP.
 
 `openadapt-agent` is the default runtime interface for a calling agent. It
 is not a second workflow engine, and it is not "OpenAdapt the agent." Flow
@@ -17,11 +27,13 @@ and audit. The CLI remains. Headless does not mean the UI is gone.
 | Role | Who | What they do |
 |---|---|---|
 | Operator | Calling agent (Claude Code, MCP client, orchestrator) | Discover, bind parameters, invoke, read outcomes |
-| Authority | Named human | Demonstrate once, certify policy, resolve identity / effect / judgment halts |
+| Authority | Named human | Admit the compiled program (watch if the agent clicked), certify policy, resolve identity / effect / judgment halts |
 | Auditor | Compliance | Sample seals, revoke admission |
 
 Computer-use agents are the user of OpenAdapt. They are not the executor
-inside OpenAdapt. Never summarize halt as success.
+inside OpenAdapt. Never summarize halt as success. A local agent may click
+during the demonstration while the person watches. The calling agent must
+not be the sole source of a production demonstration of a novel GUI path.
 
 Halt packets and typed agent-continue (missing parameter / retryable
 transport only) are not in this package yet. Identity, effect, expired
@@ -40,21 +52,30 @@ MCP client / Agent Skill
           │
           │ local stdio + exact JSON schemas
           ▼
-openadapt_agent.mcp
+openadapt_agent.mcp          (local stdio only; HTTP shim forbidden)
           │
-          ▼
-openadapt_agent.bridge
-   ├── bundle discovery and typed run tools
-   ├── PHI-safe Needs Attention projection
-   ├── action-specific operator decisions
-   └── structured success / halt / refusal results
+          ├── openadapt_agent.bridge
+          │     ├── bundle discovery and typed run tools
+          │     ├── PHI-safe Needs Attention projection
+          │     ├── action-specific operator decisions
+          │     └── structured success / halt / refusal results
+          │           │
+          │           ├── new run ──► openadapt-flow run subprocess
+          │           └── attended ─► openadapt-flow durable API
           │
-          ├── new run ──────────────► openadapt-flow run subprocess
-          │                           fail-closed admission + execution
+          ├── openadapt_agent.authoring   (--authoring first demo, stdio)
+          │     observe / start_record / click / halt
+          │     local type (agent-driven Recorder.type_text)
+          │     pause Continue → record_observed (never type_text)
+          │           │
+          │           ▼
+          │     openadapt_flow.authoring.AuthoringSession
           │
-          └── attended decision ────► openadapt-flow durable API
-                                      signed capability + idempotency
-                                      + live revalidation + audit
+          └── openadapt_agent.mailbox     (authoring connect, outbound HTTPS)
+                parse openadapt://runner / pack URL
+                POST claim oab_ → poll wait=0 → Allow-per-sub
+                Continue → record_observed (never type_text)
+                overlay chrome stays Desktop-only
 ```
 
 The MCP adapter is intentionally thin. Tool descriptions and dispatch
@@ -120,6 +141,41 @@ operation:
 Skip are registered only when a deployment configuration lets Flow
 construct its bound live executor.
 
+`--authoring` registers first-demo tools over the same local stdio
+server. Probe names match hosted MCP: `observe`, `start_record`,
+`click`, `halt`. Local stdio may also include `type` for agent-driven
+typing through Flow's Recorder. Hosted MCP remains pause-only. Human
+type during `pause_for_input` is persisted with `Recorder.record_observed`
+on the pause-target node, never `type_text`. `compile` wraps Flow
+`compile_recording` and returns `needs_human_admit`; an agent click never
+paints `VERIFIED`. `admit` is the one-token human ok of the pre-filled
+draft; the human does not fill schema, authority, effect, environment, or
+digest. If the Flow session has no `admit`, the tool fails closed and does
+not mint a Seal or write an unsigned ledger row.
+
+`--authoring` does not imply `--allow-run`. `--bundles` is optional iff
+`--authoring` (or the existing `--tutorial` / implied-tutorial path). The
+published run recipe in `server.json` still requires `--bundles` and
+stays `transport: stdio`. Authoring is a first demo; there is no bundle
+yet.
+
+Observe is a fail-closed PHI projection (`openadapt.authoring.observe/v1`):
+no `value`, `text`, window `title`, screenshot, OCR, URL, or backend
+pixels. Windows native, Citrix, and RDP are `COACH_ONLY` in v1.
+
+The session object is Flow's public `openadapt_flow.authoring` module
+(`AuthoringSession(backend, out_dir, backend_kind=…)` when F1 is
+importable). Until that module is importable, `serve --authoring` fails
+closed with an explicit dependency error. Windows native, Citrix, and
+RDP construct a coach-only stand-in and never spawn `win_agent`. Observe
+is fail-closed to the T1 wire (`additionalProperties: false`, node ids
+`n_` + 8 hex, 200 nodes / 32 KiB). Capture's projector is used when
+importable. If Desktop has advertised authoring IPC, overlay stays
+Desktop-owned; stdio `--authoring` does not speak the D2 protocol.
+`authoring connect` is the outbound mailbox client for hosted chat apps.
+Tests cover the stdio tool surface with a fake session and an F1-shaped
+session, and the mailbox client against a mocked wait=0 poll.
+
 ## Governed runs
 
 Each run tool shells out to the `openadapt-flow` installed in the same
@@ -140,7 +196,9 @@ returns unsigned success, treat it as failure.
 
 For a legacy report without `execution_outcome`, the bridge preserves the
 compatible rule: exit code 0 plus `success: true`. Local unsigned replay
-is free. Production success without a Seal is failure.
+is free. Production success without a Seal is failure. Standard and
+Regulated need an active workflow admission for the exact bundle version.
+Demo and the synthetic tutorial may run without one.
 
 Exit 1 is a halt. Exit 2 is a governed refusal before execution. A
 timeout is explicitly uncertain rather than a rollback. Report evidence
@@ -273,9 +331,19 @@ caller-controlled `USERNAME` environment variable. A blank operator
 identity fails closed.
 
 This process must not be port-forwarded or exposed as an unauthenticated
-network service. OpenAdapt Cloud owns remote authentication,
+network service. An HTTP / Streamable-HTTP **listener** in this MIT package
+remains forbidden, including when `--authoring` is set. Hosted ChatGPT.com
+/ Claude.ai cannot talk to localhost. Send those tabs to
+https://openadapt.ai/start. They still can't click the user's GUI.
+Pip users run `openadapt-agent
+authoring connect` — an **outbound** mailbox client (claim `oab_`, poll
+`wait_seconds: 0`, Allow-per-`sub`) copied from Desktop
+`engine/authoring_runner.py` when that engine is not importable. Overlay
+chrome, launchd, and the `openadapt://` URL handler stay Desktop-only.
+See `docs/MAILBOX_CLI.md`. OpenAdapt Cloud owns remote authentication,
 multi-tenancy, tenant-scoped authorization, fleet policy, and managed
-transport.
+execute. `--authoring` does not add those, and it does not imply
+`--allow-run`.
 
 ## Dependency boundary
 
@@ -309,7 +377,17 @@ Tests cover:
 - compatibility with Flow's public, thread-owned attended service;
 - success/halt/refusal/timeout outcome mapping;
 - MCP serialization and thread ownership;
-- Agent Skill emission.
+- Agent Skill emission;
+- `--authoring` probe tools (`observe`, `start_record`, `click`, `halt`)
+  and local `type`; observe projection drops values/titles/screenshots
+  and extra keys, caps the wire at 32 KiB, and uses `n_` + 8 hex node
+  ids; pause Continue uses `record_observed` rather than `type_text`;
+  compile returns `needs_human_admit`; `admit` is the one-token human
+  ok; `--authoring` does not enable
+  run tools; `server.json` stays stdio with `--bundles` required;
+  `authoring connect` parses `openadapt://runner` / pack URLs, claims
+  `oab_`, polls `wait_seconds: 0`, prompts Allow-per-`sub`, and Continue
+  uses `record_observed` (never `type_text`).
 
 CI runs on Python 3.10, 3.11, and 3.12. It also builds the wheel and
 sdist, verifies MIT metadata and license inclusion, and refuses package

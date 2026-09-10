@@ -2,10 +2,18 @@
 
 The Agent target's product state comes from its signed Production admission.
 A missing, expired, revoked, mismatched, or unverifiable admission means **not
-actively admitted**. This document describes how the package is made
-installable and discoverable as an MCP server, the security-relevant
-distinction between the *public capability* and a *user's private
-bundle*, and the exact founder-owned steps to publish and list it. The
+actively admitted**. The live target ledger is
+https://openadapt.ai/production-lifecycle.json (seven target admissions,
+`remote-safe-synthetic`). The live workflow ledger is
+https://openadapt.ai/production-workflow-admissions.json (seven synthetic
+admissions, `0.0.0-synthetic`). That isn't a customer job. Standard and
+Regulated need an active workflow admission for the exact bundle version.
+Demo and the synthetic tutorial may run without one.
+
+This document describes how the package is made installable and
+discoverable as an MCP server, the security-relevant distinction
+between the *public capability* and a *user's private bundle*, and the
+exact founder-owned steps to publish and list it. The
 publish/submission steps are **not automated here** — they mint public,
 first-party identities and are outward-facing founder actions.
 
@@ -58,13 +66,13 @@ and [`../manifest.json`](../manifest.json).
 - **Display name:** OpenAdapt Agent (openadapt-flow bridge)
 - **PyPI package:** `openadapt-agent`
 - **Version:** `2.0.2` (staged in this repository; `2.0.1` is the newest version published to PyPI)
-- **Description:** OpenAdapt is a compiled program for GUI writes with no API. This package invokes it over MCP.
+- **Description:** OpenAdapt compiles demonstrated GUI workflows into programs. This package invokes them over MCP.
 - **Homepage / docs:** https://docs.openadapt.ai
 - **Repository:** https://github.com/OpenAdaptAI/openadapt-agent
 - **License:** MIT
 - **Transport:** stdio
 - **Run command (uvx):** `uvx --from 'openadapt-agent[tutorial]' openadapt-agent serve --allow-run`
-- **Config:** `--allow-run` with no `--bundles` (public synthetic bundle, generated at serve time), `--tutorial` (same path without implying run tools), or `--bundles` (operator's private artifact), `--runs-dir`, `--allow-attended-actions`, qualified `--config` for Continue/Skip, and optional secret `OPENADAPT_BUNDLE_KEY`
+- **Config:** `--allow-run` with no `--bundles` (public synthetic bundle, generated at serve time), `--tutorial` (same path without implying run tools), `--authoring` (local Claude Code first demo; not the published registry recipe), `authoring connect` (outbound hosted mailbox; not the registry recipe), or `--bundles` (operator's private artifact), `--runs-dir`, `--allow-attended-actions`, qualified `--config` for Continue/Skip, and optional secret `OPENADAPT_BUNDLE_KEY`
 - **Tools:**
   - `list_workflows` / `get_workflow` — PHI-safe structural bundle projections with opaque IDs.
   - `get_run_report` — PHI-safe status and count summary; raw evidence stays local unless protected export was explicitly enabled.
