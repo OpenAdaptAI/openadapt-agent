@@ -30,10 +30,10 @@ SKILL_HONESTY = OUTCOME_RULES
 SKILL_NAME = "openadapt-gui-write"
 
 #: The first command once this version is on PyPI: the zero-flag sandbox.
-FIRST_COMMAND = "claude mcp add openadapt -- uvx openadapt-agent serve"
+FIRST_COMMAND = "claude mcp add openadapt -- uvx --python 3.12 openadapt-agent serve"
 #: The same command from the GitHub source, for use before the release.
 PREVIEW_COMMAND = (
-    "claude mcp add openadapt -- uvx --from "
+    "claude mcp add openadapt -- uvx --python 3.12 --from "
     "git+https://github.com/OpenAdaptAI/openadapt-agent openadapt-agent serve"
 )
 #: Older name for ``FIRST_COMMAND``.
