@@ -97,6 +97,22 @@ def test_two_stores_on_one_directory_share_the_gate(tmp_path):
     assert second.run_id == first.run_id
 
 
+def test_a_race_with_different_inputs_is_a_conflict_not_a_replay(tmp_path):
+    one = RunStore(tmp_path / "runs")
+    two = RunStore(tmp_path / "runs")
+    first = one.begin(request_id="req-0001", workflow="w", inputs={"a": "1"}, mode="production")
+    # The first process reserved and wrote its record but not yet its request
+    # entry, so the second one only meets the ledger reservation.
+    for entry in one.requests.glob("*.json"):
+        entry.unlink()
+    second = two.begin(request_id="req-0001", workflow="w", inputs={"a": "2"}, mode="production")
+    assert second.kind == "conflict"
+    assert second.first_run_id == first.run_id
+    same = two.begin(request_id="req-0001", workflow="w", inputs={"a": "1"}, mode="production")
+    assert same.kind == "replay"
+    assert same.run_id == first.run_id
+
+
 def test_unsafe_run_ids_read_nothing(store):
     assert store.read("../etc/passwd") is None
     assert store.read("run-" + "z" * 200) is None

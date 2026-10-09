@@ -304,6 +304,7 @@ class RunStore:
             record = self.new_record(request_id=request_id, workflow=workflow, mode=mode)
             record["attempt"] = attempt
             record["ledger_key"] = key
+            record["fingerprint"] = fingerprint
             try:
                 self._ledger.reserve(key, run_id=record["run_id"])
             except _Duplicate:
@@ -313,6 +314,9 @@ class RunStore:
                 if not isinstance(owner, str) or not is_safe_run_id(owner):
                     raise
                 record = self.read(owner)
+                if record is not None and record.get("fingerprint") not in (None, fingerprint):
+                    # Another process took this request_id for different inputs.
+                    return Begin("conflict", run_id=new_run_id(), first_run_id=owner)
                 if record is None and _older_than(claim.get("reserved_at"), ORPHAN_GRACE_S):
                     # Reserved, then the process died before writing the record.
                     record = self._orphan(owner, request_id, workflow, mode)
