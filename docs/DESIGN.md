@@ -12,7 +12,7 @@ workflow ledger is
 https://openadapt.ai/production-workflow-admissions.json. It currently
 lists seven synthetic admissions (`0.0.0-synthetic`). That isn't a
 customer job. Standard and Regulated need an active workflow admission
-for the exact bundle version. Demo and the synthetic tutorial may run
+for the exact bundle version. Demo and the synthetic sandbox may run
 without one.
 
 Your AI agent decides what to enter. OpenAdapt enters it in the app and checks that it saved.

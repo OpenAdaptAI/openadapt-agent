@@ -36,9 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="openadapt-agent",
         description=(
-            "Agent-facing bridge for openadapt-flow: expose compiled workflow "
-            "bundles, Needs Attention, and governed operator decisions as "
-            "local MCP tools and Agent Skills."
+            "Your AI agent decides what to enter. OpenAdapt enters it in the app "
+            "and checks that it saved. 'serve' with no flags starts a sandbox."
         ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

@@ -1,10 +1,11 @@
 """Shell out to the governed ``openadapt-flow run`` CLI and map the outcome.
 
-This module is the only new-run path in openadapt-agent. It NEVER
-reimplements replay: every ``run_*`` call is a subprocess invocation of
-``openadapt-flow run`` (the fail-closed deployment verb), so flow's
-admission gates (certification, identity arming, effect contracts,
-encryption, integrity pinning) apply exactly as they would from a terminal.
+This module is the run path for operator bundles. It NEVER reimplements
+replay: every bundle run is a subprocess invocation of ``openadapt-flow run``
+(the fail-closed deployment verb), so Flow's admission gates (certification,
+identity arming, effect contracts, encryption, integrity pinning) apply
+exactly as they would from a terminal. The synthetic sandbox calls the same
+Flow run gate in-process (see :mod:`openadapt_agent.sandbox`).
 
 Exit-code contract of ``openadapt-flow run``:
 
@@ -16,7 +17,9 @@ Exit-code contract of ``openadapt-flow run``:
 - ``2``  — **governed refusal**: an admission gate refused the bundle (or
   the bundle could not be loaded safely). Nothing was executed.
 
-A halt or refusal is always surfaced as such — never as success. Even an
+Results are derived by :mod:`openadapt_agent.contract` from Flow's
+``transaction_outcome``. A halt or refusal is never success, a verified run
+is never an error, and an uncertain save is never "nothing changed". Even an
 exit code of 0 is cross-checked against the persisted ``report.json``.
 """
 
