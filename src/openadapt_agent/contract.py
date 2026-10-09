@@ -9,16 +9,19 @@ again. The four outcomes map one-to-one onto those decisions.
 Safety rules this module enforces by construction:
 
 - The plain result is a pure function of Flow's ``transaction_outcome``, the
-  process facts (did Flow start, did it exit cleanly, did it time out), and a
-  consistency check of the persisted report. The coarse ``HALTED`` label alone
-  never selects a result.
+  process facts (did Flow start, did it exit cleanly, did it time out), the
+  state of any durable pause, and a consistency check of the persisted report.
+  The coarse ``HALTED`` label alone never selects a result.
 - Only ``done`` says the change was saved, and only a consistent ``VERIFIED``
-  report can produce it. How strong the proof is (``local`` or ``sealed``) is a
-  separate field. A verified write is never reported as an error.
+  report can produce it. How strong the proof is (``local``, ``sealed``, or
+  ``simulated`` in the sandbox) is a separate field. A verified write is never
+  reported as an error.
 - ``record_changed: "no"`` and ``safe_to_retry: true`` appear only for results
   whose evidence proves nothing was written. Uncertain delivery (including a
   timeout after Flow started) is ``not_sure_if_saved`` with
   ``safe_to_retry: false``.
+- A run with an open durable pause is ``needs_review``: a person holds the
+  decision, so the caller must not start the same work again.
 - Every sentence is fixed copy keyed by a closed reason code. No observed screen
   text, recorded value, input value, or local path can reach a result.
 """
@@ -27,21 +30,27 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 __all__ = [
     "CONTRACT_VERSION",
     "FAILED_CHECKS",
+    "LABELS",
     "MODES",
     "NEXT_STEPS",
     "OUTCOMES",
+    "PROOF",
     "REASONS",
+    "RETRYABLE_REASONS",
+    "RUNNING",
     "RUN_RESULT_SCHEMA",
     "TRANSACTION_OUTCOMES",
     "WORKFLOW_LIST_SCHEMA",
     "Reason",
     "build_result",
+    "ledger_outcome",
     "parse_failed_checks",
+    "pause_state",
     "reason_for_run",
     "report_consistency",
 ]
@@ -67,8 +76,9 @@ NEXT_STEPS = (
 )
 #: How strong the evidence behind ``done`` is. ``sealed`` means a signed
 #: receipt exists; ``local`` means the record check ran on this computer and
-#: its evidence stays here; ``none`` means no saved change is being claimed.
-PROOF = ("sealed", "local", "none")
+#: its evidence stays here; ``simulated`` means a sandbox result produced
+#: without opening any app; ``none`` means no saved change is being claimed.
+PROOF = ("sealed", "local", "simulated", "none")
 #: What is known about the target record after this run.
 RECORD_CHANGED = ("yes", "no", "unknown")
 
@@ -85,9 +95,22 @@ TRANSACTION_OUTCOMES = frozenset(
         "ROLLED_BACK",
     }
 )
+#: Flow transaction outcomes that prove no business effect occurred.
+_NO_EFFECT_OUTCOMES = frozenset(
+    {"HALTED_BEFORE_EFFECT", "REJECTED_POLICY", "CANCELED", "FAILED_PLATFORM"}
+)
 _EXECUTION_OUTCOMES = frozenset(
     {"VERIFIED", "COMPLETED_UNVERIFIED", "HALTED", "FAILED", "ROLLED_BACK"}
 )
+
+#: Short plain label per outcome group, for a UI badge or a log line.
+LABELS = {
+    "done": "Done and checked",
+    "needs_review": "Stopped before saving",
+    "not_sure_if_saved": "Check the record",
+    "did_not_run": "Didn't run",
+    RUNNING: "Running",
+}
 
 
 @dataclass(frozen=True)
@@ -100,6 +123,7 @@ class Reason:
     next_step: str
     what_happened: str
     next_action: str
+    label: Optional[str] = None
 
 
 _CHECK_RECORD = (
@@ -107,8 +131,9 @@ _CHECK_RECORD = (
     "Don't retry this request."
 )
 _WAIT_FOR_PERSON = (
-    "A person reviews this run on the computer that ran it. Don't start "
-    "another run for this work until they finish."
+    "A person reviews this run on the computer that ran it. Call get_run "
+    "later to see their decision. Don't start another run for this work "
+    "until they finish."
 )
 
 REASONS: dict[str, Reason] = {
@@ -184,6 +209,7 @@ REASONS: dict[str, Reason] = {
         "It finished the steps but didn't check the saved record, so the "
         "change may or may not be saved.",
         _CHECK_RECORD,
+        label="Finished, not checked",
     ),
     "change_reversed": Reason(
         "not_sure_if_saved",
@@ -249,6 +275,15 @@ REASONS: dict[str, Reason] = {
         "Ask the operator to check the workflow files on this computer, then "
         "send the same request again.",
     ),
+    "runs_disabled": Reason(
+        "did_not_run",
+        True,
+        "no",
+        "fix_setup",
+        "Didn't start because this server only lists workflows. Nothing was written.",
+        "Ask the operator to start the server with --mode production or "
+        "--mode attended, then send the same request again.",
+    ),
     "not_ready_to_run": Reason(
         "did_not_run",
         True,
@@ -287,6 +322,15 @@ REASONS: dict[str, Reason] = {
         "Nothing was written.",
         "Try again with the same request_id. If it keeps happening, tell the operator.",
     ),
+    "stopped_by_person": Reason(
+        "did_not_run",
+        False,
+        "no",
+        "none",
+        "A person ended this run before it saved anything. Nothing was written.",
+        "Don't retry this request. If the work is still needed, a person "
+        "decides how, and a new attempt uses a new request_id.",
+    ),
     "request_id_conflict": Reason(
         "did_not_run",
         False,
@@ -322,7 +366,14 @@ REASONS: dict[str, Reason] = {
 #: Results that let the same ``request_id`` start a fresh attempt. Each one
 #: proves nothing was written AND says the retry may now succeed.
 RETRYABLE_REASONS = frozenset(
-    {"not_ready_to_run", "policy_refused", "canceled", "platform_error", "workflow_unavailable"}
+    {
+        "not_ready_to_run",
+        "policy_refused",
+        "canceled",
+        "platform_error",
+        "workflow_unavailable",
+        "runs_disabled",
+    }
 )
 
 #: Closed vocabulary for why Flow refused to start a run.
@@ -355,7 +406,8 @@ _GATE_TITLE_CHECKS = (
     ("Encrypted bundle", "not_encrypted"),
     ("Sealed manifest", "integrity_check_failed"),
 )
-# Refusals Flow prints before its gate report.
+# Refusals Flow prints before its gate report. Order matters: the first
+# marker found wins, so specific phrases come before general ones.
 _PREGATE_CHECKS = (
     ("signed qualification admission", "no_readiness_test"),
     ("qualification authority is invalid", "readiness_test_invalid"),
@@ -383,7 +435,7 @@ def parse_failed_checks(text: str) -> list[str]:
     if not found:
         lowered = text.lower()
         for marker, code in _PREGATE_CHECKS:
-            if marker.lower() in lowered and code not in found:
+            if marker.lower() in lowered:
                 found.append(code)
                 break
     return found or ["other"]
@@ -455,66 +507,113 @@ _ATTENTION_REASONS = {
     "postcondition": "unexpected_screen",
     "resolution": "unexpected_screen",
 }
+_NO_EFFECT_DID_NOT_RUN = {
+    "REJECTED_POLICY": "policy_refused",
+    "CANCELED": "canceled",
+    "FAILED_PLATFORM": "platform_error",
+}
+
+
+def pause_state(attention: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """Reduce a Flow Needs Attention projection to ``open``, ``rejected``, or None."""
+    if not isinstance(attention, Mapping):
+        return None
+    if attention.get("status") == "rejected":
+        return "rejected"
+    if attention.get("durably_paused") is True:
+        return "open"
+    return None
 
 
 def reason_for_run(
     *,
-    status: str,
     exit_code: Optional[int],
-    process_started: Optional[bool],
-    report_present: bool,
-    report_consistent: bool,
-    execution_outcome: Optional[str],
-    transaction_outcome: Optional[str],
-    attention_category: Optional[str] = None,
+    report: object,
+    timed_out: bool = False,
+    process_started: Optional[bool] = True,
+    refused_before_start: bool = False,
+    attention: Optional[Mapping[str, Any]] = None,
 ) -> str:
     """Pick the one closed reason code for a finished run attempt.
 
-    ``status`` is the legacy runner status (success/halt/refused/timeout/error).
-    ``process_started`` is False only when Flow provably never started.
+    ``refused_before_start`` is True when Flow's admission refused the run
+    (exit code 2) and wrote no report. ``process_started`` is False only when
+    Flow provably never started. ``attention`` is Flow's PHI-safe Needs
+    Attention projection for the run, when one exists.
     """
-    if status == "refused" and not report_present:
-        # Flow's exit 2 (or an agent-side refusal before launch): nothing ran.
+    report_present = isinstance(report, dict)
+    if refused_before_start and not report_present:
         return "not_ready_to_run"
-    if status == "timeout":
+    if timed_out:
         return "timed_out"
     if not report_present:
-        if process_started is False:
-            return "platform_error"
+        return "platform_error" if process_started is False else "result_unreadable"
+    consistent, execution, tx = report_consistency(report)
+    if not consistent:
         return "result_unreadable"
-    if not report_consistent:
-        return "result_unreadable"
-    tx = transaction_outcome
     if tx is None:
         # Older report shape without a transaction outcome. Only a precise,
         # consistent VERIFIED can be done; anything else is unproven.
-        if execution_outcome == "VERIFIED" and exit_code in (0, None):
+        if execution == "VERIFIED" and exit_code in (0, None):
             return "saved_and_checked"
-        if execution_outcome is None and status == "success":
+        if execution is None and report.get("success") is True and exit_code in (0, None):
             return "not_checked"
-        if execution_outcome == "COMPLETED_UNVERIFIED":
+        if execution == "COMPLETED_UNVERIFIED":
             return "not_checked"
         return "result_unreadable"
     if tx == "VERIFIED":
         return "saved_and_checked" if exit_code in (0, None) else "result_unreadable"
-    if tx == "HALTED_BEFORE_EFFECT":
-        return _ATTENTION_REASONS.get(attention_category or "", "stopped_for_review")
+    if tx in _NO_EFFECT_OUTCOMES:
+        state = pause_state(attention)
+        if state == "rejected":
+            return "stopped_by_person"
+        category = attention.get("category") if isinstance(attention, Mapping) else None
+        if state == "open" or tx == "HALTED_BEFORE_EFFECT":
+            return _ATTENTION_REASONS.get(category or "", "stopped_for_review")
+        return _NO_EFFECT_DID_NOT_RUN[tx]
     if tx == "RECONCILIATION_REQUIRED":
         return "save_not_confirmed"
     if tx == "COMPLETED_UNVERIFIED":
         return "not_checked"
     if tx == "ROLLED_BACK":
         return "change_reversed"
-    if tx == "REJECTED_POLICY":
-        return "policy_refused"
-    if tx == "CANCELED":
-        return "canceled"
-    if tx == "FAILED_PLATFORM":
-        return "platform_error"
     return "result_unreadable"
 
 
+#: Flow ledger value recorded for each reason, so the idempotency ledger keeps
+#: a terminal outcome for every attempt. Uncertain results stay uncertain.
+_LEDGER_OUTCOMES = {
+    "saved_and_checked": "VERIFIED",
+    "save_not_confirmed": "RECONCILIATION_REQUIRED",
+    "not_checked": "COMPLETED_UNVERIFIED",
+    "change_reversed": "ROLLED_BACK",
+    "timed_out": "RECONCILIATION_REQUIRED",
+    "result_unreadable": "RECONCILIATION_REQUIRED",
+    "interrupted": "RECONCILIATION_REQUIRED",
+    "canceled": "CANCELED",
+    "platform_error": "FAILED_PLATFORM",
+    "not_ready_to_run": "REJECTED_POLICY",
+    "policy_refused": "REJECTED_POLICY",
+    "workflow_unavailable": "FAILED_PLATFORM",
+    "runs_disabled": "REJECTED_POLICY",
+    "stopped_by_person": "HALTED_BEFORE_EFFECT",
+}
+
+
+def ledger_outcome(reason: str, transaction_outcome: Optional[str] = None) -> Optional[str]:
+    """Return the Flow ``TransactionOutcome`` value to record for a reason."""
+    if transaction_outcome in TRANSACTION_OUTCOMES:
+        return transaction_outcome
+    spec = REASONS.get(reason)
+    if spec is not None and spec.outcome == "needs_review":
+        return "HALTED_BEFORE_EFFECT"
+    return _LEDGER_OUTCOMES.get(reason)
+
+
 _SANDBOX_NOTE = " This was a sandbox run on a synthetic app, so no real record changed."
+_SIMULATED_NOTE = (
+    " This sandbox result was simulated without opening any app, so no record was checked."
+)
 
 
 def build_result(
@@ -528,28 +627,35 @@ def build_result(
     execution_outcome: Optional[str] = None,
     transaction_outcome: Optional[str] = None,
     failed_checks: Iterable[str] = (),
-    invalid_inputs: Iterable[dict[str, str]] = (),
+    invalid_inputs: Iterable[Mapping[str, str]] = (),
     needs_attention_id: Optional[str] = None,
     first_run_id: Optional[str] = None,
     replayed: bool = False,
     seconds: Optional[float] = None,
     model_calls: Optional[int] = None,
+    sandbox: Optional[Mapping[str, str]] = None,
 ) -> dict[str, Any]:
     """Render one PHI-safe result object from a closed reason code."""
-    spec = REASONS.get(reason) or REASONS["result_unreadable"]
-    if spec is not REASONS.get(reason):
+    spec = REASONS.get(reason)
+    if spec is None:
         reason = "result_unreadable"
+        spec = REASONS[reason]
+    simulated = bool(sandbox) and sandbox.get("engine") == "simulated"
     if spec.outcome == "done":
-        proof = proof if proof in {"sealed", "local"} else "local"
+        if simulated:
+            proof = "simulated"
+        elif proof not in {"sealed", "local"}:
+            proof = "local"
     else:
         proof = "none"
     what_happened = spec.what_happened
     if spec.outcome == "done" and proof == "local":
         what_happened += " The check ran on this computer, so there's no signed receipt."
     if mode == "sandbox" and spec.outcome != RUNNING:
-        what_happened += _SANDBOX_NOTE
+        what_happened += _SIMULATED_NOTE if simulated else _SANDBOX_NOTE
     result: dict[str, Any] = {
         "outcome": spec.outcome,
+        "label": spec.label or LABELS[spec.outcome],
         "safe_to_retry": spec.safe_to_retry,
         "what_happened": what_happened,
         "next_action": spec.next_action,
@@ -564,15 +670,14 @@ def build_result(
         "contract_version": CONTRACT_VERSION,
     }
     checks = [code for code in failed_checks if code in FAILED_CHECKS]
-    if spec.outcome == "did_not_run" and reason == "not_ready_to_run":
+    if reason == "not_ready_to_run":
         result["failed_checks"] = checks or ["other"]
-    problems = [
-        {"input": item["input"], "problem": item["problem"]}
-        for item in invalid_inputs
-        if isinstance(item, dict) and "input" in item and "problem" in item
-    ]
     if reason == "invalid_input":
-        result["invalid_inputs"] = problems
+        result["invalid_inputs"] = [
+            {"input": str(item["input"]), "problem": str(item["problem"])}
+            for item in invalid_inputs
+            if isinstance(item, Mapping) and "input" in item and "problem" in item
+        ]
     if needs_attention_id and spec.outcome in {"needs_review", "not_sure_if_saved"}:
         result["needs_attention_id"] = needs_attention_id
     if first_run_id and reason == "request_id_conflict":
@@ -583,6 +688,10 @@ def build_result(
         result["seconds"] = round(float(seconds), 1)
     if isinstance(model_calls, int) and not isinstance(model_calls, bool) and model_calls >= 0:
         result["model_calls"] = model_calls
+    if sandbox:
+        result["sandbox"] = {
+            key: str(value) for key, value in sandbox.items() if key in {"case", "engine"}
+        }
     technical: dict[str, Any] = {}
     if execution_outcome in _EXECUTION_OUTCOMES:
         technical["execution_outcome"] = execution_outcome
@@ -605,10 +714,11 @@ RUN_RESULT_SCHEMA: dict[str, Any] = {
             "description": (
                 "done: saved and checked. needs_review: stopped before saving; a "
                 "person decides. not_sure_if_saved: a person must check the record "
-                "before anything runs again. did_not_run: nothing was written. "
-                "running: call get_run later."
+                "before anything runs again; never retry. did_not_run: nothing was "
+                "written. running: call get_run later."
             ),
         },
+        "label": {"type": "string"},
         "safe_to_retry": {
             "type": "boolean",
             "description": (
@@ -649,10 +759,18 @@ RUN_RESULT_SCHEMA: dict[str, Any] = {
         "review_url": {"type": "string"},
         "seconds": {"type": "number"},
         "model_calls": {"type": "integer"},
+        "sandbox": {
+            "type": "object",
+            "properties": {
+                "case": {"type": "string"},
+                "engine": {"type": "string", "enum": ["flow", "simulated"]},
+            },
+        },
         "technical": {"type": "object"},
     },
     "required": [
         "outcome",
+        "label",
         "safe_to_retry",
         "what_happened",
         "next_action",
@@ -664,6 +782,7 @@ RUN_RESULT_SCHEMA: dict[str, Any] = {
         "request_id",
         "workflow",
         "mode",
+        "contract_version",
     ],
 }
 
@@ -684,7 +803,7 @@ WORKFLOW_LIST_SCHEMA: dict[str, Any] = {
                     "done_means": {"type": "string"},
                     "inputs": {"type": "object"},
                     "available": {"type": "boolean"},
-                    "sandbox": {"type": "boolean"},
+                    "changes_records": {"type": "boolean"},
                 },
                 "required": ["name", "purpose", "done_means", "inputs", "available"],
             },
