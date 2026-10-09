@@ -69,7 +69,7 @@ Here is a real result from the sandbox. The synthetic app saved the note and the
   "proof": "none",
   "workflow": "add_triage_note",
   "request_id": "demo-timeout-after-save",
-  "run_id": "run-68ecc09407a3417190aa3e96",
+  "run_id": "run-cef0b138a5e1488abbd805f5",
   "model_calls": 0
 }
 ```

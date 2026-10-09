@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-09T17:49:18+00:00",
+  "captured_at": "2026-10-09T22:46:34+00:00",
   "engine": "flow",
   "provenance": "Measured on synthetic data: openadapt-agent sandbox, flow engine, MockMed synthetic clinic app. No real records.",
   "results": {
@@ -7,20 +7,20 @@
       "contract_version": "openadapt.run-result/v1",
       "label": "Didn't run",
       "mode": "sandbox",
-      "next_action": "Try again with the same request_id. If it keeps happening, tell the operator.",
+      "next_action": "Try again with the same request_id once the app is back. If it keeps happening, tell the operator.",
       "next_step": "retry",
       "outcome": "did_not_run",
       "proof": "none",
-      "reason": "platform_error",
+      "reason": "app_unreachable",
       "record_changed": "no",
       "request_id": "demo-app-offline",
-      "run_id": "run-b405df4962ff4d31be8ab526",
+      "run_id": "run-6314b8b10b93421899360217",
       "safe_to_retry": true,
       "sandbox": {
         "case": "app_offline",
         "engine": "flow"
       },
-      "what_happened": "OpenAdapt hit a problem on this computer before it changed anything. Nothing was written. This was a sandbox run on a synthetic app; no real record was touched.",
+      "what_happened": "Didn't start because the app isn't reachable from this computer. Nothing was written. This was a sandbox run on a synthetic app; no real record was touched.",
       "workflow": "add_triage_note"
     },
     "duplicate_record": {
@@ -28,7 +28,7 @@
       "label": "Stopped before saving",
       "mode": "sandbox",
       "model_calls": 0,
-      "needs_attention_id": "cf08c2de5e5bdf719fed9c82",
+      "needs_attention_id": "77d744a682594d44a3f8810d",
       "next_action": "A person reviews this run on the computer that ran it. Call get_run later to see their decision. Don't start another run for this work until they finish.",
       "next_step": "wait_for_person",
       "outcome": "needs_review",
@@ -36,13 +36,13 @@
       "reason": "record_not_confirmed",
       "record_changed": "no",
       "request_id": "demo-duplicate-record",
-      "run_id": "run-9aef372e7b734d4baf51e1b1",
+      "run_id": "run-0b5813cc521e4854a6c3ffa3",
       "safe_to_retry": false,
       "sandbox": {
         "case": "duplicate_record",
         "engine": "flow"
       },
-      "seconds": 1.0,
+      "seconds": 1.2,
       "technical": {
         "execution_outcome": "HALTED",
         "transaction_outcome": "HALTED_BEFORE_EFFECT"
@@ -55,7 +55,7 @@
       "label": "Check the record",
       "mode": "sandbox",
       "model_calls": 0,
-      "needs_attention_id": "1264dbf20b45883486e6b03f",
+      "needs_attention_id": "77917c25aa8da46d4de2826a",
       "next_action": "Have a person check the record in the app before anything runs again. Don't retry this request.",
       "next_step": "check_record",
       "outcome": "not_sure_if_saved",
@@ -63,13 +63,13 @@
       "reason": "save_not_confirmed",
       "record_changed": "unknown",
       "request_id": "demo-false-saved-banner",
-      "run_id": "run-0b4b16245f8b4d6ca517df5d",
+      "run_id": "run-5b151caa473e4ab292d7e108",
       "safe_to_retry": false,
       "sandbox": {
         "case": "false_saved_banner",
         "engine": "flow"
       },
-      "seconds": 9.9,
+      "seconds": 9.8,
       "technical": {
         "execution_outcome": "HALTED",
         "transaction_outcome": "RECONCILIATION_REQUIRED"
@@ -94,7 +94,7 @@
       "reason": "invalid_input",
       "record_changed": "no",
       "request_id": "demo-invalid",
-      "run_id": "run-908e33ffb61f4f65a458ae55",
+      "run_id": "run-9d88393a00f54898a3a0af9c",
       "safe_to_retry": true,
       "what_happened": "Didn't start because some inputs aren't valid. Nothing was written. This was a sandbox run on a synthetic app; no real record was touched.",
       "workflow": "add_triage_note"
@@ -185,13 +185,13 @@
       "reason": "saved_and_checked",
       "record_changed": "yes",
       "request_id": "demo-normal",
-      "run_id": "run-e362925da58f4908827c3a33",
+      "run_id": "run-8c28f0bcac224af9b6947a7d",
       "safe_to_retry": false,
       "sandbox": {
         "case": "normal",
         "engine": "flow"
       },
-      "seconds": 5.7,
+      "seconds": 5.0,
       "technical": {
         "execution_outcome": "VERIFIED",
         "transaction_outcome": "VERIFIED"
@@ -212,13 +212,13 @@
       "record_changed": "yes",
       "replayed": true,
       "request_id": "demo-normal",
-      "run_id": "run-e362925da58f4908827c3a33",
+      "run_id": "run-8c28f0bcac224af9b6947a7d",
       "safe_to_retry": false,
       "sandbox": {
         "case": "normal",
         "engine": "flow"
       },
-      "seconds": 5.7,
+      "seconds": 5.0,
       "technical": {
         "execution_outcome": "VERIFIED",
         "transaction_outcome": "VERIFIED"
@@ -231,7 +231,7 @@
       "label": "Check the record",
       "mode": "sandbox",
       "model_calls": 0,
-      "needs_attention_id": "320eadb9258819d62f7bb36d",
+      "needs_attention_id": "481486193ef0e44c0e2b0dd6",
       "next_action": "Have a person check the record in the app before anything runs again. Don't retry this request.",
       "next_step": "check_record",
       "outcome": "not_sure_if_saved",
@@ -239,13 +239,13 @@
       "reason": "save_not_confirmed",
       "record_changed": "unknown",
       "request_id": "demo-timeout-after-save",
-      "run_id": "run-68ecc09407a3417190aa3e96",
+      "run_id": "run-cef0b138a5e1488abbd805f5",
       "safe_to_retry": false,
       "sandbox": {
         "case": "timeout_after_save",
         "engine": "flow"
       },
-      "seconds": 10.7,
+      "seconds": 10.2,
       "technical": {
         "execution_outcome": "HALTED",
         "transaction_outcome": "RECONCILIATION_REQUIRED"
