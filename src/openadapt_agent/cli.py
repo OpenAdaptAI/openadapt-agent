@@ -308,9 +308,8 @@ def _resolve_mode(args: argparse.Namespace) -> Optional[str]:
     if args.tutorial:
         return "sandbox"
     if args.bundles:
-        if args.allow_run and args.allow_attended_actions:
-            return "attended"
-        return "production"
+        # Older flags: a person can answer paused runs with or without runs.
+        return "attended" if args.allow_attended_actions else "production"
     if args.authoring:
         return None
     return "sandbox"

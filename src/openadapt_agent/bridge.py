@@ -183,7 +183,7 @@ class AgentBridge:
         if mode is None:
             if sandbox is not None:
                 mode = "sandbox"
-            elif allow_attended_actions and allow_run:
+            elif allow_attended_actions:
                 mode = "attended"
             else:
                 mode = "production"

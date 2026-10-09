@@ -199,6 +199,7 @@ repeats the text. Every declared input stays required unless
 | `--bundles DIR` | production, read-only | `list_workflows`, `get_run`, `get_workflow`, `get_run_report`, `list_needs_attention`, `get_attention_item` |
 | `--mode production --bundles DIR` (or `--allow-run`) | production | the above plus `run_workflow` and deprecated `run_<opaque-id>` |
 | `--mode attended --bundles DIR` (or `--allow-run --allow-attended-actions`) | attended | the above plus Reject, Teach, Escalate; Continue and Skip with a qualified `--config` |
+| `--bundles DIR --allow-attended-actions` (older flags, no runs) | attended, read-only | the read-only tools plus the same decisions on paused runs |
 
 The read-only tools return PHI-safe projections: workflow cards, opaque
 ids, availability, status, and count or boolean metrics. They do not

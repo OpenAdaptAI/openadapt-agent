@@ -154,6 +154,12 @@ def test_mode_production_enables_runs_and_attended_adds_decisions(
     assert main(["serve", "--bundles", str(bundles_root), "--runs-dir", runs]) == 0
     assert "run_workflow" not in captured["tools"]
     assert captured["listing"]["run_tools_enabled"] is False
+    # Older flags: decisions on paused runs without runs still label as attended.
+    argv = ["serve", "--bundles", str(bundles_root), "--runs-dir", runs, "--allow-attended-actions"]
+    assert main(argv) == 0
+    assert captured["bridge"].mode == "attended"
+    assert "run_workflow" not in captured["tools"]
+    assert "reject_attention" in captured["tools"]
 
 
 def test_authoring_flag_does_not_require_bundles_or_imply_allow_run(tmp_path):
