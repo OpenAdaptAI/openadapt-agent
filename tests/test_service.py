@@ -263,3 +263,42 @@ def test_records_hold_no_input_values(monkeypatch, bundles_root, runner_config, 
         for name in files:
             if name.endswith(".json"):
                 assert secret not in open(os.path.join(root, name)).read()
+
+
+def test_attention_lookup_works_under_a_symlinked_runs_directory(monkeypatch, tmp_path):
+    from openadapt_agent.attended import AttendedBridge
+
+    real = tmp_path / "real"
+    (real / "runs" / "run-abc").mkdir(parents=True)
+    (tmp_path / "link").symlink_to(real, target_is_directory=True)
+    seen = {}
+
+    def fake_attention_item(root, path):
+        seen["relative"] = path.relative_to(root)
+        return None
+
+    monkeypatch.setattr("openadapt_flow.console.attention.attention_item", fake_attention_item)
+    bridge = AttendedBridge(tmp_path / "link" / "runs")
+    assert bridge.for_run_dir(tmp_path / "link" / "runs" / "run-abc") is None
+    assert str(seen["relative"]) == "run-abc"
+
+
+def test_failed_attention_lookup_waits_for_a_person_instead_of_inviting_retry(tmp_path):
+    from openadapt_agent.contract import REASONS, reason_for_run
+    from openadapt_agent.service import attention_for
+
+    class Broken:
+        def for_run_dir(self, run_dir):
+            raise ValueError("boom")
+
+    attention = attention_for(Broken(), tmp_path)
+    report = {
+        "success": False,
+        "execution_outcome": "HALTED",
+        "transaction_outcome": "REJECTED_POLICY",
+        "execution_profile": "standard",
+        "production_eligible": False,
+    }
+    reason = reason_for_run(exit_code=1, report=report, attention=attention)
+    assert REASONS[reason].outcome == "needs_review"
+    assert REASONS[reason].safe_to_retry is False

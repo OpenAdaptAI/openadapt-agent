@@ -27,6 +27,7 @@ from openadapt_agent.runner import FlowRunner, is_safe_run_id
 from openadapt_agent.runs import RunStore, pid_alive
 
 __all__ = [
+    "attention_for",
     "CatalogEntry",
     "EngineResult",
     "FlowCliEngine",
@@ -84,6 +85,20 @@ class CatalogEntry:
         return self.card.name
 
 
+#: What a failed attention lookup stands for: a pause may be open, so the
+#: run waits for a person instead of inviting a retry.
+_UNKNOWN_PAUSE = {"status": "pending", "durably_paused": True, "category": None}
+
+
+def attention_for(attended: Any, run_dir: Any) -> Optional[dict[str, Any]]:
+    """Flow's Needs Attention projection for a run, failing toward caution."""
+    try:
+        return attended.for_run_dir(run_dir)
+    except Exception:
+        _LOG.exception("could not read the Needs Attention state for a run")
+        return dict(_UNKNOWN_PAUSE)
+
+
 class FlowCliEngine:
     """Run an operator bundle through the governed ``openadapt-flow run`` CLI."""
 
@@ -102,7 +117,7 @@ class FlowCliEngine:
         )
         attention = None
         if outcome.status == "halt":
-            attention = self.attended.for_run_dir(outcome.run_dir)
+            attention = attention_for(self.attended, outcome.run_dir)
             outcome.apply_attention(attention)
         summary = outcome.summary if isinstance(outcome.summary, dict) else {}
         total_ms = summary.get("total_ms")
@@ -111,7 +126,7 @@ class FlowCliEngine:
             execution_outcome=outcome.execution_outcome,
             transaction_outcome=outcome.transaction_outcome,
             failed_checks=list(outcome.failed_checks),
-            needs_attention_id=(attention or {}).get("id") if attention else None,
+            needs_attention_id=(attention or {}).get("id"),
             model_calls=summary.get("model_calls"),
             seconds=total_ms / 1000.0 if isinstance(total_ms, (int, float)) else None,
         )
@@ -128,7 +143,7 @@ class FlowCliEngine:
             return None
         if not isinstance(report, dict):
             return None
-        attention = self.attended.for_run_dir(run_dir)
+        attention = attention_for(self.attended, run_dir)
         reason = reason_for_run(exit_code=None, report=report, attention=attention)
         transaction = report.get("transaction_outcome")
         execution = report.get("execution_outcome")
@@ -136,7 +151,7 @@ class FlowCliEngine:
             reason=reason,
             execution_outcome=execution if isinstance(execution, str) else None,
             transaction_outcome=transaction if isinstance(transaction, str) else None,
-            needs_attention_id=(attention or {}).get("id") if attention else None,
+            needs_attention_id=(attention or {}).get("id"),
         )
 
 

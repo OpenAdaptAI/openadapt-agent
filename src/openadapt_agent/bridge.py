@@ -71,6 +71,7 @@ from openadapt_agent.service import (
     FlowCliEngine,
     RunService,
     ServiceError,
+    attention_for,
 )
 
 __all__ = ["AgentBridge", "BridgeError", "ToolSpec", "REQUEST_ID_PATTERN"]
@@ -673,7 +674,7 @@ class AgentBridge:
         reason = reason_for_run(
             exit_code=None,
             report=report,
-            attention=self.attended.for_run_dir(run_dir),
+            attention=attention_for(self.attended, run_dir),
         )
         outcome = RunOutcome(
             status=status_for_reason(reason),
@@ -747,7 +748,7 @@ class AgentBridge:
             url_override=url_override,
         )
         attention = (
-            self.attended.for_run_dir(outcome.run_dir) if outcome.status == "halt" else None
+            attention_for(self.attended, outcome.run_dir) if outcome.status == "halt" else None
         )
         outcome.apply_attention(attention)
         result = outcome.to_dict(

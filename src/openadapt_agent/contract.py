@@ -197,8 +197,7 @@ REASONS: dict[str, Reason] = {
         False,
         "unknown",
         "check_record",
-        "OpenAdapt can't tell whether the change was saved. The record check "
-        "didn't confirm it.",
+        "OpenAdapt can't confirm whether the change was saved. It may have gone through.",
         _CHECK_RECORD,
     ),
     "not_checked": Reason(
@@ -610,7 +609,7 @@ def ledger_outcome(reason: str, transaction_outcome: Optional[str] = None) -> Op
     return _LEDGER_OUTCOMES.get(reason)
 
 
-_SANDBOX_NOTE = " This was a sandbox run on a synthetic app, so no real record changed."
+_SANDBOX_NOTE = " This was a sandbox run on a synthetic app; no real record was touched."
 _SIMULATED_NOTE = (
     " This sandbox result was simulated without opening any app, so no record was checked."
 )

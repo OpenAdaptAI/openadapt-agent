@@ -47,7 +47,7 @@ from urllib.request import Request, urlopen
 
 from openadapt_agent.cards import WorkflowCard
 from openadapt_agent.contract import parse_failed_checks, reason_for_run
-from openadapt_agent.service import CatalogEntry, EngineResult
+from openadapt_agent.service import CatalogEntry, EngineResult, attention_for
 
 __all__ = [
     "CASES",
@@ -220,7 +220,7 @@ class SandboxEngine:
     ) -> None:
         if engine not in {"auto", "flow", "simulated"}:
             raise ValueError("sandbox engine must be auto, flow, or simulated")
-        self.runs_dir = Path(runs_dir)
+        self.runs_dir = Path(runs_dir).expanduser().resolve()
         self.headed = headed
         self.unavailable_reason: Optional[str] = None
         if engine == "simulated":
@@ -462,7 +462,8 @@ class SandboxEngine:
             except Exception:
                 pass
         report = self._report(run_dir, report_model)
-        attention = self.attended.for_run_dir(run_dir)
+        verified = isinstance(report, dict) and report.get("transaction_outcome") == "VERIFIED"
+        attention = None if verified else attention_for(self.attended, run_dir)
         model_calls = report.get("model_calls") if isinstance(report, dict) else None
         return EngineResult(
             reason_for_run(exit_code=None, report=report, attention=attention),
@@ -502,7 +503,7 @@ class SandboxEngine:
             return None
         if not isinstance(report, dict):
             return None
-        attention = self.attended.for_run_dir(run_dir)
+        attention = attention_for(self.attended, run_dir)
         return EngineResult(
             reason_for_run(exit_code=None, report=report, attention=attention),
             execution_outcome=report.get("execution_outcome"),
