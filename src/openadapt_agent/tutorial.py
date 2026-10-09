@@ -1,8 +1,8 @@
-"""Generate and host the public synthetic tutorial for ``serve --tutorial``.
+"""Generate and host the synthetic MockMed workflow the sandbox runs.
 
 The compiled bundle is not vendored. Record, compile, and certify go through
 Flow's public tutorial APIs. MockMed stays up for the life of the MCP server
-so a governed ``run`` can hit a live system of record. Synthetic data only.
+so every sandbox run hits a live system of record. Synthetic data only.
 """
 
 from __future__ import annotations
@@ -25,6 +25,8 @@ class TutorialSession:
     deployment_config: Path
     work_dir: Path
     close: Callable[[], None]
+    #: MockMed's origin, without the tutorial entry query.
+    base_url: str = ""
 
 
 def _deployment_yaml(base_url: str, entry_url: str) -> str:
@@ -32,6 +34,7 @@ def _deployment_yaml(base_url: str, entry_url: str) -> str:
     return (
         "name: synthetic-tutorial\n"
         "backend:\n"
+        "  kind: web\n"
         f'  url: "{entry_url}"\n'
         "  headed: false\n"
         "effects:\n"
@@ -123,4 +126,5 @@ def prepare_tutorial_session(
         deployment_config=config_path,
         work_dir=root,
         close=stop,
+        base_url=base_url,
     )
