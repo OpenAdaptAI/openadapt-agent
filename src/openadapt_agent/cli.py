@@ -11,8 +11,8 @@ Subcommands:
 - ``authoring connect`` — outbound mailbox client for hosted ChatGPT.com /
   Claude.ai (claim ``oab_``, poll wait=0, Allow-per-sub). Not an HTTP
   listener. Overlay chrome stays Desktop-only.
-- ``emit-skill`` — emit a Claude Agent Skill folder for one bundle
-  (wraps ``openadapt-flow emit-skill`` and appends MCP + halt guidance).
+- ``emit-skill`` — write a PHI-safe Agent Skill for one workflow from its
+  card: purpose, inputs, and how to read the four outcomes.
 
 ``serve`` stays local stdio. Hosted ChatGPT.com reaches this computer through
 ``authoring connect`` (outbound HTTPS), not a port-forwarded MCP server.
@@ -270,12 +270,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "emit-skill",
         help=(
-            "Emit a Claude Agent Skill folder for a bundle (wraps "
-            "`openadapt-flow emit-skill`, appends MCP + halt guidance)"
+            "Write an Agent Skill for one workflow: what it does, its inputs, and "
+            "how to read the result. No recorded values, step text, or secrets."
         ),
     )
     p.add_argument("bundle", help="Workflow bundle directory")
     p.add_argument("--out", required=True, help="Parent directory for the skill folder")
+    p.add_argument(
+        "--include-bundle",
+        action="store_true",
+        help=(
+            "Also copy the compiled bundle next to SKILL.md. The copy is protected "
+            "workflow data; install it only where that data may live."
+        ),
+    )
     p.set_defaults(func=_cmd_emit_skill)
 
     return parser
@@ -504,7 +512,13 @@ def _cmd_authoring_connect(args: argparse.Namespace) -> int:
 def _cmd_emit_skill(args: argparse.Namespace) -> int:
     from openadapt_agent.skill import emit_agent_skill
 
-    skill_dir = emit_agent_skill(Path(args.bundle), Path(args.out))
+    try:
+        skill_dir = emit_agent_skill(
+            Path(args.bundle), Path(args.out), include_bundle=args.include_bundle
+        )
+    except ValueError as exc:
+        print(f"emit-skill: {exc}", file=sys.stderr)
+        return 2
     print(f"Wrote Agent Skill folder: {skill_dir}")
     return 0
 

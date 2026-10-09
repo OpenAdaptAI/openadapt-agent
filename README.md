@@ -5,7 +5,7 @@
 
 `mcp-name: io.github.OpenAdaptAI/openadapt-agent`
 
-OpenAdapt compiles demonstrated GUI workflows into programs. This package invokes them over MCP.
+Your AI agent decides what to enter. OpenAdapt enters it in the app and checks that it saved.
 
 `pip install openadapt` includes this package. Point a local MCP client at `openadapt-agent serve --allow-run` and the calling agent can invoke a compiled GUI program on this computer. Healthy runs make no model calls. Flow still runs the program. Policy, identity, verification, pauses, repair, and audit stay in [`openadapt-flow`](https://github.com/OpenAdaptAI/openadapt-flow). `--allow-run` is an explicit opt-in. Admission stays fail-closed.
 

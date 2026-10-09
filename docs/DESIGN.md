@@ -15,7 +15,7 @@ customer job. Standard and Regulated need an active workflow admission
 for the exact bundle version. Demo and the synthetic tutorial may run
 without one.
 
-OpenAdapt compiles demonstrated GUI workflows into programs. This package invokes them over MCP.
+Your AI agent decides what to enter. OpenAdapt enters it in the app and checks that it saved.
 
 `openadapt-agent` is the default runtime interface for a calling agent. It
 is not a second workflow engine, and it is not "OpenAdapt the agent." Flow
