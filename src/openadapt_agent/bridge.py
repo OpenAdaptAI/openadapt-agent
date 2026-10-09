@@ -39,13 +39,15 @@ from openadapt_agent.bundles import (
     tool_input_schema,
 )
 from openadapt_agent.copy import REQUIRES_SEAL_META
+from openadapt_agent.contract import reason_for_run
 from openadapt_agent.runner import (
     FlowRunner,
     RunnerConfig,
+    RunOutcome,
     classify_report_status,
     is_safe_run_id,
-    public_outcome_message,
     public_report_summary,
+    status_for_reason,
 )
 
 __all__ = ["AgentBridge", "BridgeError", "ToolSpec"]
@@ -410,20 +412,24 @@ class AgentBridge:
             raise BridgeError("the local report could not be read safely") from exc
         if not isinstance(report, dict):
             raise BridgeError("the local report has no trustworthy terminal structure")
-        status, execution_outcome = classify_report_status(report)
-        result = {
-            "schema_version": 1,
-            "run_id": run_id,
-            "status": status,
-            "success": status == "success",
-            "sealed": False,
-            "requires_seal": True,
-            "frames_included": False,
-            "message": public_outcome_message(status, execution_outcome),
-            "summary": public_report_summary(report),
-        }
-        if execution_outcome is not None:
-            result["execution_outcome"] = execution_outcome
+        _status, execution_outcome = classify_report_status(report)
+        transaction = report.get("transaction_outcome")
+        reason = reason_for_run(
+            exit_code=None,
+            report=report,
+            attention=self.attended.for_run_dir(run_dir),
+        )
+        outcome = RunOutcome(
+            status=status_for_reason(reason),
+            workflow="",
+            run_id=run_id,
+            execution_outcome=execution_outcome,
+            transaction_outcome=transaction if isinstance(transaction, str) else None,
+            reason=reason,
+            summary=public_report_summary(report),
+        )
+        result = outcome.to_dict()
+        result.pop("workflow_id", None)
         if self.allow_protected_export:
             result["protected"] = {
                 "run_dir": str(run_dir),
@@ -461,9 +467,13 @@ class AgentBridge:
             params=params,
             url_override=url_override,
         )
+        attention = (
+            self.attended.for_run_dir(outcome.run_dir) if outcome.status == "halt" else None
+        )
+        outcome.apply_attention(attention)
         result = outcome.to_dict(
             include_protected=self.allow_protected_export,
         )
         if outcome.status == "halt":
-            result["needs_attention"] = self.attended.for_run_dir(outcome.run_dir)
+            result["needs_attention"] = attention
         return result

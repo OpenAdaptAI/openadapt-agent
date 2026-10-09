@@ -175,6 +175,7 @@ def test_get_run_report_never_turns_demo_completion_into_verified_success(
         {
             "execution_profile": "demo",
             "execution_outcome": "COMPLETED_UNVERIFIED",
+            "transaction_outcome": "COMPLETED_UNVERIFIED",
             "production_eligible": False,
         }
     )
@@ -186,7 +187,7 @@ def test_get_run_report_never_turns_demo_completion_into_verified_success(
     assert fetched["status"] == "halt"
     assert fetched["success"] is False
     assert fetched["execution_outcome"] == "COMPLETED_UNVERIFIED"
-    assert "completed" in fetched["message"]
+    assert "finished the steps" in fetched["message"]
     assert "did not complete" not in fetched["message"]
     assert str(runner_config.runs_dir) not in json.dumps(fetched)
 
@@ -201,6 +202,7 @@ def test_run_and_report_lookup_use_the_same_public_outcome_message(
         {
             "execution_profile": "demo",
             "execution_outcome": "COMPLETED_UNVERIFIED",
+            "transaction_outcome": "COMPLETED_UNVERIFIED",
             "production_eligible": False,
         }
     )
