@@ -120,7 +120,7 @@ def status_for_reason(reason: str, *, refused: bool = False, timed_out: bool = F
         return "timeout"
     if reason == "saved_and_checked":
         return "success"
-    if reason in {"result_unreadable", "platform_error"}:
+    if reason in {"result_unreadable", "platform_error", "app_unreachable"}:
         return "error"
     return "halt"
 

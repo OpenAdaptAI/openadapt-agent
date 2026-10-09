@@ -68,6 +68,13 @@ def test_each_case_returns_its_outcome(sandbox_bridge, case):
         assert "did not change" not in result["what_happened"]
 
 
+def test_app_offline_says_the_app_is_unreachable(sandbox_bridge):
+    result = run(sandbox_bridge, case="app_offline", request_id="demo-offline")
+    assert result["reason"] == "app_unreachable"
+    assert result["safe_to_retry"] is True
+    assert "isn't reachable" in result["what_happened"]
+
+
 def test_default_case_is_normal(sandbox_bridge):
     assert run(sandbox_bridge)["outcome"] == "done"
 

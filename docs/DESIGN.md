@@ -138,6 +138,7 @@ pause, and a consistency check of the persisted report:
 | a server that stopped mid-run | `interrupted` | `not_sure_if_saved` |
 | exit 2 before execution | `not_ready_to_run` with closed `failed_checks` | `did_not_run` |
 | Flow could not be launched | `platform_error` | `did_not_run` |
+| the app isn't reachable, checked before anything is sent (sandbox) | `app_unreachable` | `did_not_run` |
 | invalid inputs, unknown workflow, runs disabled | `invalid_input`, `unknown_workflow`, `runs_disabled` | `did_not_run` |
 
 Only `done` says the change was saved. `record_changed: "no"` and

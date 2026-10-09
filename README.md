@@ -42,7 +42,7 @@ Every request ends in one of four outcomes. Each one tells your agent what to do
 | `done` | Done and checked | OpenAdapt saved the entry and read the record back to confirm it. | Marks the item complete and keeps the `run_id`. |
 | `needs_review` | Stopped before saving | Something didn't match, so it stopped before changing anything. Nothing was written. A person decides. | Waits. It doesn't start the same work again. |
 | `not_sure_if_saved` | Check the record | A save may have gone through. A person checks the record before anything is retried. | Never retries. It routes the item to the person who checks. |
-| `did_not_run` | Didn't run | It didn't start, so nothing was written. | Fixes the cause, such as a bad input, and retries with the same request id. |
+| `did_not_run` | Didn't run | Nothing was written. It didn't start, or a person ended it before it saved anything. | Fixes the cause, such as a bad input, and retries with the same request id when `safe_to_retry` is true. |
 
 Each result also carries `safe_to_retry`, one plain sentence in `what_happened`, a `next_action`, and `proof`. `proof` is `local` when the record check ran on the customer's computer. It's never a reason to report a saved entry as a failure.
 

@@ -322,6 +322,16 @@ REASONS: dict[str, Reason] = {
         "Nothing was written.",
         "Try again with the same request_id. If it keeps happening, tell the operator.",
     ),
+    "app_unreachable": Reason(
+        "did_not_run",
+        True,
+        "no",
+        "retry",
+        "Didn't start because the app isn't reachable from this computer. "
+        "Nothing was written.",
+        "Try again with the same request_id once the app is back. If it keeps "
+        "happening, tell the operator.",
+    ),
     "stopped_by_person": Reason(
         "did_not_run",
         False,
@@ -371,6 +381,7 @@ RETRYABLE_REASONS = frozenset(
         "policy_refused",
         "canceled",
         "platform_error",
+        "app_unreachable",
         "workflow_unavailable",
         "runs_disabled",
     }
@@ -595,6 +606,7 @@ _LEDGER_OUTCOMES = {
     "interrupted": "RECONCILIATION_REQUIRED",
     "canceled": "CANCELED",
     "platform_error": "FAILED_PLATFORM",
+    "app_unreachable": "FAILED_PLATFORM",
     "not_ready_to_run": "REJECTED_POLICY",
     "policy_refused": "REJECTED_POLICY",
     "workflow_unavailable": "FAILED_PLATFORM",

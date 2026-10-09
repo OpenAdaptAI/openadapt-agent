@@ -113,5 +113,5 @@ def test_app_offline_did_not_run(flow_sandbox):
     bridge, _engine = flow_sandbox
     result = call(bridge, "app_offline", "e2e-offline")
     assert result["outcome"] == "did_not_run", result
-    assert result["reason"] == "platform_error"
+    assert result["reason"] == "app_unreachable"
     assert result["safe_to_retry"] is True

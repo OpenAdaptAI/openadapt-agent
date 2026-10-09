@@ -346,7 +346,7 @@ class SandboxEngine:
     def _simulate(self, case: SandboxCase) -> EngineResult:
         sandbox = self._sandbox(case, "simulated")
         if case.query is None:
-            return EngineResult("platform_error", sandbox=sandbox)
+            return EngineResult("app_unreachable", sandbox=sandbox)
         verified = case.execution == "VERIFIED"
         report = {
             "success": verified,
@@ -381,7 +381,7 @@ class SandboxEngine:
         with self._lock:
             # Pre-flight: nothing has been sent to the app yet.
             if not _reachable(base_url):
-                return EngineResult("platform_error", sandbox=sandbox)
+                return EngineResult("app_unreachable", sandbox=sandbox)
             return self._governed_run(case, run_id, params, base_url, started, sandbox)
 
     def _governed_run(
