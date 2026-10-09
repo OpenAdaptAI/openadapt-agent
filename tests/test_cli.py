@@ -280,7 +280,11 @@ def test_tutorial_serve_uses_slug_tool_and_standard_profile(monkeypatch, tmp_pat
     assert result == 0
     bridge = captured["bridge"]
     assert bridge.public_synthetic is True
-    names = [spec.name for spec in bridge.list_tool_specs() if spec.name.startswith("run_")]
+    names = [
+        spec.name
+        for spec in bridge.list_tool_specs()
+        if spec.name.startswith("run_") and spec.name != "run_workflow"
+    ]
     assert names == ["run_local_quickstart"]
     assert "--profile" in bridge.runner_config.extra_run_args
     assert "standard" in bridge.runner_config.extra_run_args
@@ -345,7 +349,11 @@ def test_serve_allow_run_without_bundles_starts_the_synthetic_tutorial(
     assert result == 0
     bridge = captured["bridge"]
     assert bridge.public_synthetic is True
-    names = [spec.name for spec in bridge.list_tool_specs() if spec.name.startswith("run_")]
+    names = [
+        spec.name
+        for spec in bridge.list_tool_specs()
+        if spec.name.startswith("run_") and spec.name != "run_workflow"
+    ]
     assert names == ["run_local_quickstart"]
     assert "--approve-unverified-writes" not in bridge.runner_config.extra_run_args
     assert captured.get("closed") is True

@@ -33,7 +33,7 @@ from typing import Any, Optional
 from openadapt_agent.contract import RETRYABLE_REASONS, ledger_outcome
 from openadapt_agent.runner import is_safe_run_id, new_run_id
 
-__all__ = ["Begin", "MAX_ATTEMPTS", "RunStore", "pid_alive"]
+__all__ = ["Begin", "MAX_ATTEMPTS", "RunStore", "pid_alive", "read_record"]
 
 _LOG = logging.getLogger(__name__)
 _RECORD_SCHEMA = "openadapt-agent.run/v1"
@@ -296,6 +296,16 @@ class RunStore:
             entry["fingerprint"] = fingerprint
             _write_json(entry_path, entry)
             return Begin("new", run_id=record["run_id"], record=record)
+
+
+def read_record(runs_dir: Path | str, run_id: str) -> Optional[dict[str, Any]]:
+    """Read one run record without creating anything on disk."""
+    if not is_safe_run_id(run_id):
+        return None
+    record = _read_json(Path(runs_dir) / "openadapt-agent" / "runs" / f"{run_id}.json")
+    if record is None or record.get("schema") != _RECORD_SCHEMA:
+        return None
+    return record
 
 
 def pid_alive(pid: Any) -> bool:
