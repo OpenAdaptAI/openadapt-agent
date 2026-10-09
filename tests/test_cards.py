@@ -44,7 +44,7 @@ def typed_bundle(tmp_path: Path) -> Path:
             "urgent": ParamSpec(
                 name="urgent",
                 type=getattr(ParamKind, "BOOLEAN", ParamKind.NUMBER),
-                example=False if hasattr(ParamKind, "BOOLEAN") else 0,
+                example=False if hasattr(ParamKind, "BOOLEAN") else "0",
             ),
         },
         steps=[
