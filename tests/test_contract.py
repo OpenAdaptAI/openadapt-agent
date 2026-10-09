@@ -218,7 +218,7 @@ def test_simulated_sandbox_done_is_labelled_simulated():
         sandbox={"case": "normal", "engine": "simulated"},
     )
     assert result["proof"] == "simulated"
-    assert "simulated" in result["what_happened"]
+    assert result["what_happened"].startswith("Simulated sandbox result")
     assert result["sandbox"] == {"case": "normal", "engine": "simulated"}
 
 

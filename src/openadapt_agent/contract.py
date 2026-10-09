@@ -610,9 +610,7 @@ def ledger_outcome(reason: str, transaction_outcome: Optional[str] = None) -> Op
 
 
 _SANDBOX_NOTE = " This was a sandbox run on a synthetic app; no real record was touched."
-_SIMULATED_NOTE = (
-    " This sandbox result was simulated without opening any app, so no record was checked."
-)
+_SIMULATED_PREFIX = "Simulated sandbox result (no app was opened): "
 
 
 def build_result(
@@ -650,8 +648,10 @@ def build_result(
     what_happened = spec.what_happened
     if spec.outcome == "done" and proof == "local":
         what_happened += " The check ran on this computer, so there's no signed receipt."
-    if mode == "sandbox" and spec.outcome != RUNNING:
-        what_happened += _SIMULATED_NOTE if simulated else _SANDBOX_NOTE
+    if simulated and spec.outcome != RUNNING:
+        what_happened = _SIMULATED_PREFIX + what_happened
+    elif mode == "sandbox" and spec.outcome != RUNNING:
+        what_happened += _SANDBOX_NOTE
     result: dict[str, Any] = {
         "outcome": spec.outcome,
         "label": spec.label or LABELS[spec.outcome],

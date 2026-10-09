@@ -60,7 +60,7 @@ def test_each_case_returns_its_outcome(sandbox_bridge, case):
     assert result["outcome"] == CASES[case].outcome
     assert result["mode"] == "sandbox"
     assert result["sandbox"] == {"case": case, "engine": "simulated"}
-    assert "simulated" in result["what_happened"]
+    assert result["what_happened"].startswith("Simulated sandbox result")
     if result["outcome"] == "done":
         assert result["proof"] == "simulated"
     if result["outcome"] == "not_sure_if_saved":
