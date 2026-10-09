@@ -302,3 +302,18 @@ def test_failed_attention_lookup_waits_for_a_person_instead_of_inviting_retry(tm
     reason = reason_for_run(exit_code=1, report=report, attention=attention)
     assert REASONS[reason].outcome == "needs_review"
     assert REASONS[reason].safe_to_retry is False
+
+
+@pytest.mark.parametrize("request_id", ["", "abc", "has space", "x" * 200, None, 42])
+def test_bad_request_id_is_refused_before_anything_runs(
+    monkeypatch, bundles_root, runner_config, request_id
+):
+    stub = FlowCliStub(exit_code=0)
+    monkeypatch.setattr(runner_mod.subprocess, "run", stub)
+    bridge = make_bridge(bundles_root, runner_config)
+    with pytest.raises(BridgeError, match="request_id"):
+        bridge.dispatch(
+            "run_workflow",
+            {"workflow": workflow_name(bridge), "inputs": {"note": "x"}, "request_id": request_id},
+        )
+    assert stub.calls == []

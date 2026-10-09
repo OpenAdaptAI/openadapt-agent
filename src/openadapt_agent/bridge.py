@@ -67,6 +67,7 @@ from openadapt_agent.runs import RunStore, read_record
 from openadapt_agent.service import (
     DEFAULT_WAIT_SECONDS,
     MAX_WAIT_SECONDS,
+    REQUEST_ID_PATTERN,
     CatalogEntry,
     FlowCliEngine,
     RunService,
@@ -78,9 +79,6 @@ __all__ = ["AgentBridge", "BridgeError", "ToolSpec", "REQUEST_ID_PATTERN"]
 
 _LOG = logging.getLogger(__name__)
 
-#: A request_id is the caller's own id for one piece of work. Letters,
-#: digits, and a few separators only, so free text (a name) can't ride in it.
-REQUEST_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{3,127}$"
 _RUN_ID_PATTERN = r"^run-[A-Za-z0-9._-]{1,124}$"
 
 
@@ -495,12 +493,15 @@ class AgentBridge:
                     "runs are disabled: the operator started this server without "
                     "--mode production or --mode attended"
                 )
-            return self.service.run(
-                arguments.get("workflow"),
-                arguments.get("inputs"),
-                arguments.get("request_id", ""),
-                arguments.get("wait_seconds", DEFAULT_WAIT_SECONDS),
-            )
+            try:
+                return self.service.run(
+                    arguments.get("workflow"),
+                    arguments.get("inputs"),
+                    arguments.get("request_id"),
+                    arguments.get("wait_seconds", DEFAULT_WAIT_SECONDS),
+                )
+            except ServiceError as exc:
+                raise BridgeError(str(exc)) from exc
         if name == "get_run":
             try:
                 return self.service.get(

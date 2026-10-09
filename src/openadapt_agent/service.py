@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ from openadapt_agent.runner import FlowRunner, is_safe_run_id
 from openadapt_agent.runs import RunStore, pid_alive
 
 __all__ = [
+    "REQUEST_ID_PATTERN",
     "attention_for",
     "CatalogEntry",
     "EngineResult",
@@ -38,6 +40,9 @@ __all__ = [
 ]
 
 _LOG = logging.getLogger(__name__)
+#: The caller's id for one piece of work: no spaces, so free text can't ride in it.
+REQUEST_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{3,127}$"
+REQUEST_ID_RE = re.compile(REQUEST_ID_PATTERN)
 MAX_WAIT_SECONDS = 600
 DEFAULT_WAIT_SECONDS = 60
 #: Outcomes a person can still change after the run reports.
@@ -212,9 +217,14 @@ class RunService:
         self,
         workflow: Any,
         inputs: Any,
-        request_id: str,
+        request_id: Any,
         wait_seconds: Any = DEFAULT_WAIT_SECONDS,
     ) -> dict[str, Any]:
+        if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
+            raise ServiceError(
+                "request_id must be 4 to 128 letters, digits, '.', '_', ':' or '-'. "
+                "Nothing ran."
+            )
         wait = self._wait_seconds(wait_seconds, DEFAULT_WAIT_SECONDS)
         entry = self.catalog.get(workflow) if isinstance(workflow, str) else None
         if entry is None:
@@ -246,6 +256,15 @@ class RunService:
         if begin.kind == "retry_limit":
             return self._refuse("retry_limit", request_id=request_id, workflow=entry.name)
         if begin.kind == "replay":
+            if begin.record is None and self.store.read(begin.run_id) is None:
+                # Another process won the reservation and hasn't written its
+                # record yet. It is running; never start a second attempt.
+                placeholder = {
+                    "run_id": begin.run_id,
+                    "request_id": request_id,
+                    "workflow": entry.name,
+                }
+                return {**self._result("running", placeholder), "replayed": True}
             return self.get(begin.run_id, wait_seconds=wait, replayed=True)
         self._start(entry, begin.record, coerce_inputs(entry.card, inputs), inputs)
         return self.get(begin.run_id, wait_seconds=wait)

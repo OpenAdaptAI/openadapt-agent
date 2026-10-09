@@ -139,7 +139,9 @@ class RunStore:
     """PHI-safe run records plus the request index and idempotency ledger."""
 
     def __init__(self, runs_dir: Path | str, *, max_attempts: int = MAX_ATTEMPTS) -> None:
-        self.root = Path(runs_dir) / "openadapt-agent"
+        # Canonical path: Flow's ledger refuses symlinked components, and two
+        # servers must agree on one ledger for the same directory.
+        self.root = Path(runs_dir).expanduser().resolve() / "openadapt-agent"
         self.runs = self.root / "runs"
         self.requests = self.root / "requests"
         for directory in (self.root, self.runs, self.requests):
