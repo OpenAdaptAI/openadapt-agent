@@ -223,6 +223,9 @@ class AgentBridge:
                     info=info,
                     legacy_id=workflow_id,
                 )
+        self._entries_by_id = {
+            entry.legacy_id: entry for entry in self.catalog.values() if entry.legacy_id
+        }
 
     @property
     def service(self) -> RunService:
@@ -478,9 +481,6 @@ class AgentBridge:
                 )
         return specs
 
-    def tool_spec(self, name: str) -> Optional[ToolSpec]:
-        return next((spec for spec in self.list_tool_specs() if spec.name == name), None)
-
     # -- dispatch ----------------------------------------------------------
 
     def dispatch(self, name: str, arguments: Optional[dict]) -> dict:
@@ -541,7 +541,7 @@ class AgentBridge:
             }
             item["inputs"] = inputs_schema(entry.card, require_all=not self.allow_recorded_defaults)
             if entry.legacy_id is not None and entry.info is not None:
-                item.update(self._workflow_projection(entry.legacy_id, entry.info))
+                item.update(self._workflow_projection(entry.legacy_id, entry.info, entry))
             workflows.append(item)
         result: dict[str, Any] = {
             "mode": self.mode,
@@ -574,10 +574,10 @@ class AgentBridge:
         self,
         workflow_id: str,
         info: WorkflowInfo,
+        entry: Optional[CatalogEntry] = None,
     ) -> dict:
-        entry = next(
-            (item for item in self.catalog.values() if item.legacy_id == workflow_id), None
-        )
+        if entry is None:
+            entry = self._entries_by_id.get(workflow_id)
         properties = entry.card.inputs if entry is not None else {}
         result = {
             "id": workflow_id,

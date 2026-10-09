@@ -101,3 +101,10 @@ def test_legacy_tools_are_not_offered_in_the_sandbox(sandbox_bridge):
 
     with pytest.raises(BridgeError):
         sandbox_bridge.dispatch("list_needs_attention", {})
+
+
+def test_omitted_default_and_explicit_default_are_the_same_request(sandbox_bridge):
+    first = run(sandbox_bridge, request_id="demo-default")
+    explicit = run(sandbox_bridge, case="normal", request_id="demo-default")
+    assert explicit["run_id"] == first["run_id"]
+    assert explicit["replayed"] is True

@@ -41,6 +41,9 @@ _REQUEST_SCHEMA = "openadapt-agent.request/v1"
 _LEDGER_NAMESPACE = "openadapt-agent/run-workflow/v1"
 #: Attempts one request_id may make when earlier ones proved nothing was written.
 MAX_ATTEMPTS = 5
+#: How long a reservation may sit without its run record before it is treated
+#: as left behind by a process that died between the two writes.
+ORPHAN_GRACE_S = 120.0
 
 
 def _now() -> str:
@@ -94,7 +97,7 @@ class _ClaimFiles:
         except FileExistsError as exc:
             raise _Duplicate(key) from exc
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump({"run_id": run_id}, handle)
+            json.dump({"run_id": run_id, "reserved_at": _now()}, handle)
 
     def lookup(self, key: str) -> Optional[dict[str, Any]]:
         return _read_json(self._path(key))
@@ -218,6 +221,17 @@ class RunStore:
             "host": socket.gethostname(),
         }
 
+    def _orphan(
+        self, run_id: str, request_id: str, workflow: str, mode: str
+    ) -> dict[str, Any]:
+        """A running record with no owner process: get_run marks it interrupted."""
+        record = self.new_record(
+            request_id=request_id, workflow=workflow, mode=mode, run_id=run_id
+        )
+        record["pid"] = None
+        self.write(record)
+        return record
+
     def save_refusal(self, record: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         """Persist a result that never reserved the request (bad input, conflict)."""
         record = dict(record, state="finished", finished_at=_now(), result=result)
@@ -270,6 +284,11 @@ class RunStore:
                 return Begin("conflict", run_id=new_run_id(), first_run_id=attempts[0])
             if attempts:
                 latest = self.read(attempts[-1])
+                if latest is None:
+                    # The entry is written only after the record, so a missing
+                    # or unreadable record was lost. Leave an orphan that
+                    # get_run reports as interrupted, never as running forever.
+                    latest = self._orphan(attempts[-1], request_id, workflow, mode)
                 reason = ((latest or {}).get("result") or {}).get("reason")
                 retryable = (
                     latest is not None
@@ -289,15 +308,33 @@ class RunStore:
                 self._ledger.reserve(key, run_id=record["run_id"])
             except _Duplicate:
                 # Another process won this attempt. Read its result instead.
-                owner = (self._ledger.lookup(key) or {}).get("run_id")
-                if isinstance(owner, str) and is_safe_run_id(owner):
-                    return Begin("replay", run_id=owner, record=self.read(owner))
-                raise
+                claim = self._ledger.lookup(key) or {}
+                owner = claim.get("run_id")
+                if not isinstance(owner, str) or not is_safe_run_id(owner):
+                    raise
+                record = self.read(owner)
+                if record is None and _older_than(claim.get("reserved_at"), ORPHAN_GRACE_S):
+                    # Reserved, then the process died before writing the record.
+                    record = self._orphan(owner, request_id, workflow, mode)
+                return Begin("replay", run_id=owner, record=record)
             self.write(record)
             entry["attempts"] = [*attempts, record["run_id"]]
             entry["fingerprint"] = fingerprint
             _write_json(entry_path, entry)
             return Begin("new", run_id=record["run_id"], record=record)
+
+
+def _older_than(timestamp: Any, seconds: float) -> bool:
+    """Whether an ISO timestamp is more than ``seconds`` old. Unknown is old."""
+    if not isinstance(timestamp, str):
+        return True
+    try:
+        then = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return True
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - then).total_seconds() > seconds
 
 
 def read_record(runs_dir: Path | str, run_id: str) -> Optional[dict[str, Any]]:

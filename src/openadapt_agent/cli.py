@@ -323,13 +323,6 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from openadapt_agent.runner import default_flow_cli
     from openadapt_agent.tutorial import TutorialError
 
-    if args.allow_attended_actions and args.flow_cli:
-        print(
-            "serve: attended actions require the openadapt-flow installed in "
-            "this interpreter; --flow-cli cannot select a different runtime",
-            file=sys.stderr,
-        )
-        return 2
     if args.authoring and args.tutorial:
         print("serve: --authoring cannot be combined with --tutorial", file=sys.stderr)
         return 2
@@ -350,6 +343,14 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         mode = _resolve_mode(args)
     except ValueError as exc:
         print(f"serve: {exc}", file=sys.stderr)
+        return 2
+    # After mode resolution, so --mode attended is covered too.
+    if args.allow_attended_actions and args.flow_cli:
+        print(
+            "serve: attended actions require the openadapt-flow installed in "
+            "this interpreter; --flow-cli cannot select a different runtime",
+            file=sys.stderr,
+        )
         return 2
     if mode == "sandbox" and (args.url or args.config):
         print(
@@ -372,7 +373,15 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             from openadapt_agent.authoring import AuthoringBridge, AuthoringError
             from openadapt_agent.authoring import open_authoring_session
 
-            authoring_dir = Path(args.runs_dir or "runs").expanduser().resolve() / "authoring"
+            if args.runs_dir:
+                authoring_root = Path(args.runs_dir)
+            elif mode == "sandbox":
+                from openadapt_agent.sandbox import default_sandbox_dir
+
+                authoring_root = default_sandbox_dir()
+            else:
+                authoring_root = Path("runs")
+            authoring_dir = authoring_root.expanduser().resolve() / "authoring"
             try:
                 authoring_bridge = AuthoringBridge(
                     open_authoring_session(

@@ -115,3 +115,26 @@ def test_pid_alive_detects_this_process_and_rejects_nonsense():
     assert pid_alive(os.getpid()) is True
     assert pid_alive(None) is False
     assert pid_alive(-1) is False
+
+
+def test_lost_run_record_resolves_to_an_orphan_not_running_forever(store, tmp_path):
+    first = store.begin(request_id="req-0001", workflow="w", inputs={}, mode="production")
+    (tmp_path / "runs" / "openadapt-agent" / "runs" / f"{first.run_id}.json").unlink()
+    again = store.begin(request_id="req-0001", workflow="w", inputs={}, mode="production")
+    assert again.kind == "replay"
+    assert again.run_id == first.run_id
+    assert again.record["state"] == "running"
+    assert again.record["pid"] is None
+
+
+def test_stale_reservation_without_a_record_becomes_an_orphan(store, monkeypatch):
+    import openadapt_agent.runs as runs_mod
+
+    run_id = "run-" + "d" * 24
+    request_hash = store._request_hash("req-0002")
+    store._ledger.reserve(f"{request_hash}:1", run_id=run_id)
+    monkeypatch.setattr(runs_mod, "ORPHAN_GRACE_S", -1.0)
+    begin = store.begin(request_id="req-0002", workflow="w", inputs={}, mode="production")
+    assert begin.kind == "replay"
+    assert begin.run_id == run_id
+    assert begin.record["pid"] is None

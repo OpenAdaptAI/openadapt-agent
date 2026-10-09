@@ -45,6 +45,7 @@ __all__ = [
     "RUNNING",
     "RUN_RESULT_SCHEMA",
     "TRANSACTION_OUTCOMES",
+    "TRANSACTION_REASONS",
     "WORKFLOW_LIST_SCHEMA",
     "Reason",
     "build_result",
@@ -511,6 +512,15 @@ _NO_EFFECT_DID_NOT_RUN = {
     "CANCELED": "canceled",
     "FAILED_PLATFORM": "platform_error",
 }
+#: Reason for each non-VERIFIED transaction outcome when nothing else is known.
+#: Proven-no-effect outcomes assume a pause may be open, so they wait for a
+#: person rather than invite a retry; ``reason_for_run`` refines them.
+TRANSACTION_REASONS = {
+    "RECONCILIATION_REQUIRED": "save_not_confirmed",
+    "COMPLETED_UNVERIFIED": "not_checked",
+    "ROLLED_BACK": "change_reversed",
+    **{outcome: "stopped_for_review" for outcome in _NO_EFFECT_OUTCOMES},
+}
 
 
 def pause_state(attention: Optional[Mapping[str, Any]]) -> Optional[str]:
@@ -570,13 +580,7 @@ def reason_for_run(
         if state == "open" or tx == "HALTED_BEFORE_EFFECT":
             return _ATTENTION_REASONS.get(category or "", "stopped_for_review")
         return _NO_EFFECT_DID_NOT_RUN[tx]
-    if tx == "RECONCILIATION_REQUIRED":
-        return "save_not_confirmed"
-    if tx == "COMPLETED_UNVERIFIED":
-        return "not_checked"
-    if tx == "ROLLED_BACK":
-        return "change_reversed"
-    return "result_unreadable"
+    return TRANSACTION_REASONS.get(tx, "result_unreadable")
 
 
 #: Flow ledger value recorded for each reason, so the idempotency ledger keeps

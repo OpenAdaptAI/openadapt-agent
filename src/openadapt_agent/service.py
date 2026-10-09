@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import socket
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,7 @@ from openadapt_agent.runs import RunStore, pid_alive
 __all__ = [
     "REQUEST_ID_PATTERN",
     "attention_for",
+    "reason_from_run_dir",
     "CatalogEntry",
     "EngineResult",
     "FlowCliEngine",
@@ -138,26 +140,42 @@ class FlowCliEngine:
 
     def refresh(self, entry: CatalogEntry, run_id: str) -> Optional[EngineResult]:
         """Re-read a reviewed run: a person may have continued or ended it."""
-        run_dir = Path(self.runner.config.runs_dir) / run_id
-        report_path = run_dir / "report.json"
-        if run_dir.is_symlink() or report_path.is_symlink() or not report_path.is_file():
-            return None
-        try:
-            report = json.loads(report_path.read_text())
-        except (OSError, ValueError):
-            return None
-        if not isinstance(report, dict):
-            return None
-        attention = attention_for(self.attended, run_dir)
-        reason = reason_for_run(exit_code=None, report=report, attention=attention)
-        transaction = report.get("transaction_outcome")
-        execution = report.get("execution_outcome")
-        return EngineResult(
-            reason=reason,
-            execution_outcome=execution if isinstance(execution, str) else None,
-            transaction_outcome=transaction if isinstance(transaction, str) else None,
-            needs_attention_id=(attention or {}).get("id"),
-        )
+        return reason_from_run_dir(self.attended, Path(self.runner.config.runs_dir) / run_id)
+
+
+def _owned_elsewhere(record: Mapping[str, Any]) -> bool:
+    """Whether another live process may still be running this record.
+
+    A record from another computer (a shared runs directory) can't be
+    checked from here, so it counts as running rather than being overwritten.
+    """
+    host = record.get("host")
+    if isinstance(host, str) and host and host != socket.gethostname():
+        return True
+    pid = record.get("pid")
+    return pid != os.getpid() and pid_alive(pid)
+
+
+def reason_from_run_dir(attended: Any, run_dir: Path) -> Optional[EngineResult]:
+    """Re-derive a run's result from Flow's report and review state on disk."""
+    report_path = run_dir / "report.json"
+    if run_dir.is_symlink() or report_path.is_symlink() or not report_path.is_file():
+        return None
+    try:
+        report = json.loads(report_path.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(report, dict):
+        return None
+    attention = attention_for(attended, run_dir)
+    transaction = report.get("transaction_outcome")
+    execution = report.get("execution_outcome")
+    return EngineResult(
+        reason=reason_for_run(exit_code=None, report=report, attention=attention),
+        execution_outcome=execution if isinstance(execution, str) else None,
+        transaction_outcome=transaction if isinstance(transaction, str) else None,
+        needs_attention_id=(attention or {}).get("id"),
+    )
 
 
 class RunService:
@@ -235,6 +253,15 @@ class RunService:
         if not self.allow_run:
             return self._refuse("runs_disabled", request_id=request_id, workflow=entry.name)
         inputs = {} if inputs is None else inputs
+        if isinstance(inputs, Mapping):
+            # Fill declared defaults so "omitted" and "sent the default" are
+            # the same request for request_id purposes.
+            defaults = {
+                name: schema["default"]
+                for name, schema in entry.card.inputs.items()
+                if "default" in schema and name not in inputs
+            }
+            inputs = {**defaults, **inputs}
         problems = input_problems(entry.card, inputs, require_all=self.require_all_inputs)
         if problems:
             return self._refuse(
@@ -333,7 +360,7 @@ class RunService:
         if record is None:
             raise ServiceError("no run with that run_id on this server")
         if record.get("state") != "finished":
-            other_process = record.get("pid") != os.getpid() and pid_alive(record.get("pid"))
+            other_process = _owned_elsewhere(record)
             if active or other_process:
                 result = self._result("running", record)
                 if replayed:

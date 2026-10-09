@@ -350,3 +350,32 @@ def test_a_run_finishing_during_get_is_never_marked_interrupted(
     assert first["outcome"] in {"running", "done"}
     final = bridge.dispatch("get_run", {"run_id": started["run_id"], "wait_seconds": 10})
     assert final["outcome"] == "done"
+
+
+def test_orphaned_run_reads_as_interrupted_through_get_run(bundles_root, runner_config):
+    bridge = make_bridge(bundles_root, runner_config)
+    store = bridge.service.store
+    record = store.new_record(request_id="ref-0010", workflow="w", mode="production")
+    record["pid"] = None
+    store.write(record)
+    result = bridge.dispatch("get_run", {"run_id": record["run_id"], "wait_seconds": 0})
+    assert result["reason"] == "interrupted"
+
+
+def test_run_owned_by_another_computer_is_not_overwritten(bundles_root, runner_config):
+    bridge = make_bridge(bundles_root, runner_config)
+    store = bridge.service.store
+    record = store.new_record(request_id="ref-0011", workflow="w", mode="production")
+    record.update(pid=2**22 + 7, host="another-computer.invalid")
+    store.write(record)
+    result = bridge.dispatch("get_run", {"run_id": record["run_id"], "wait_seconds": 0})
+    assert result["outcome"] == "running"
+    assert store.read(record["run_id"])["state"] == "running"
+
+
+def test_attended_mode_with_another_flow_cli_is_refused(bundles_root, capsys):
+    from openadapt_agent.cli import main
+
+    argv = ["serve", "--mode", "attended", "--bundles", str(bundles_root), "--flow-cli", "x"]
+    assert main(argv) == 2
+    assert "cannot select a different runtime" in capsys.readouterr().err

@@ -39,6 +39,7 @@ from typing import Any, Mapping, Optional
 
 from openadapt_agent.contract import (
     REASONS,
+    TRANSACTION_REASONS,
     build_result,
     parse_failed_checks,
     reason_for_run,
@@ -81,17 +82,6 @@ _STATUS_FALLBACK_REASONS = {
     "timeout": "timed_out",
     "error": "result_unreadable",
 }
-_HALT_TRANSACTION_REASONS = {
-    "RECONCILIATION_REQUIRED": "save_not_confirmed",
-    "HALTED_BEFORE_EFFECT": "stopped_for_review",
-    "COMPLETED_UNVERIFIED": "not_checked",
-    "ROLLED_BACK": "change_reversed",
-    "REJECTED_POLICY": "policy_refused",
-    "CANCELED": "canceled",
-    "FAILED_PLATFORM": "platform_error",
-}
-
-
 def legacy_reason(
     status: str,
     execution_outcome: Optional[str] = None,
@@ -103,8 +93,8 @@ def legacy_reason(
     transaction outcome a halt is reported as uncertain.
     """
     if status == "halt":
-        if transaction_outcome in _HALT_TRANSACTION_REASONS:
-            return _HALT_TRANSACTION_REASONS[transaction_outcome]
+        if transaction_outcome in TRANSACTION_REASONS:
+            return TRANSACTION_REASONS[transaction_outcome]
         if execution_outcome == "COMPLETED_UNVERIFIED":
             return "not_checked"
         if execution_outcome == "ROLLED_BACK":

@@ -47,7 +47,12 @@ from urllib.request import Request, urlopen
 
 from openadapt_agent.cards import WorkflowCard
 from openadapt_agent.contract import parse_failed_checks, reason_for_run
-from openadapt_agent.service import CatalogEntry, EngineResult, attention_for
+from openadapt_agent.service import (
+    CatalogEntry,
+    EngineResult,
+    attention_for,
+    reason_from_run_dir,
+)
 
 __all__ = [
     "CASES",
@@ -493,23 +498,9 @@ class SandboxEngine:
 
     def refresh(self, entry: CatalogEntry, run_id: str) -> Optional[EngineResult]:
         """Re-read a reviewed flow-engine run; simulated runs never change."""
-        run_dir = self.runs_dir / run_id
-        report_path = run_dir / "report.json"
-        if self.engine != "flow" or not report_path.is_file() or report_path.is_symlink():
+        if self.engine != "flow":
             return None
-        try:
-            report = json.loads(report_path.read_text())
-        except (OSError, ValueError):
-            return None
-        if not isinstance(report, dict):
-            return None
-        attention = attention_for(self.attended, run_dir)
-        return EngineResult(
-            reason_for_run(exit_code=None, report=report, attention=attention),
-            execution_outcome=report.get("execution_outcome"),
-            transaction_outcome=report.get("transaction_outcome"),
-            needs_attention_id=(attention or {}).get("id") if attention else None,
-        )
+        return reason_from_run_dir(self.attended, self.runs_dir / run_id)
 
 
 def default_sandbox_dir() -> Path:
