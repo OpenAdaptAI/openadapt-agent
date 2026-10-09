@@ -324,12 +324,15 @@ class RunService:
             event = self._active.get(run_id)
         if event is not None:
             event.wait(self._wait_seconds(wait_seconds, DEFAULT_WAIT_SECONDS))
+        # Check activity BEFORE reading the record. A worker writes its result
+        # and only then leaves the active set, so "not active" followed by an
+        # unfinished record really means nobody in this process is running it.
+        with self._lock:
+            active = run_id in self._active
         record = self.store.read(run_id)
         if record is None:
             raise ServiceError("no run with that run_id on this server")
         if record.get("state") != "finished":
-            with self._lock:
-                active = run_id in self._active
             other_process = record.get("pid") != os.getpid() and pid_alive(record.get("pid"))
             if active or other_process:
                 result = self._result("running", record)

@@ -317,3 +317,36 @@ def test_bad_request_id_is_refused_before_anything_runs(
             {"workflow": workflow_name(bridge), "inputs": {"note": "x"}, "request_id": request_id},
         )
     assert stub.calls == []
+
+
+def test_a_run_finishing_during_get_is_never_marked_interrupted(
+    monkeypatch, bundles_root, runner_config, success_report
+):
+    """Regression: the finish/active race must not overwrite a real result."""
+    import threading
+
+    gate = threading.Event()
+    stub = FlowCliStub(exit_code=0, report=success_report)
+
+    def held(*args, **kwargs):
+        gate.wait(10)
+        return stub(*args, **kwargs)
+
+    monkeypatch.setattr(runner_mod.subprocess, "run", held)
+    bridge = make_bridge(bundles_root, runner_config)
+    started = run(bridge, wait=0)
+    service = bridge.service
+    real_read = service.store.read
+
+    def read_then_finish(run_id):
+        record = real_read(run_id)
+        gate.set()
+        time.sleep(0.5)  # let the worker write its result and leave
+        return record
+
+    monkeypatch.setattr(service.store, "read", read_then_finish)
+    first = bridge.dispatch("get_run", {"run_id": started["run_id"], "wait_seconds": 0})
+    monkeypatch.setattr(service.store, "read", real_read)
+    assert first["outcome"] in {"running", "done"}
+    final = bridge.dispatch("get_run", {"run_id": started["run_id"], "wait_seconds": 10})
+    assert final["outcome"] == "done"
