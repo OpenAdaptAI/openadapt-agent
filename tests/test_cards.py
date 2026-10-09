@@ -40,7 +40,12 @@ def typed_bundle(tmp_path: Path) -> Path:
             "referral_date": ParamSpec(
                 name="referral_date", type=ParamKind.DATE, example="2026-01-02"
             ),
-            "urgent": ParamSpec(name="urgent", type=ParamKind.BOOLEAN, example=False),
+            # BOOLEAN arrived after Flow 1.26; NUMBER covers the floor.
+            "urgent": ParamSpec(
+                name="urgent",
+                type=getattr(ParamKind, "BOOLEAN", ParamKind.NUMBER),
+                example=False if hasattr(ParamKind, "BOOLEAN") else 0,
+            ),
         },
         steps=[
             Step(id="s1", intent="Open the chart for 1234567", action=ActionKind.CLICK),
@@ -61,7 +66,7 @@ def test_default_card_uses_flow_types_without_examples(tmp_path):
     assert card.authored is False
     assert schema["properties"]["specialty"]["enum"] == ["Cardiology", "Dermatology"]
     assert schema["properties"]["referral_date"]["format"] == "date"
-    assert schema["properties"]["urgent"]["type"] == "boolean"
+    assert schema["properties"]["urgent"]["type"] in {"boolean", "number"}
     assert schema["required"] == ["patient_mrn", "referral_date", "specialty", "urgent"]
     serialized = json.dumps(card.projection())
     for recorded in ("1234567", "2026-01-02", "Open the chart"):
@@ -148,5 +153,7 @@ def test_valid_inputs_pass_and_render_for_flow(tmp_path):
         "referral_date": "2026-10-08",
         "urgent": True,
     }
+    if card.inputs["urgent"]["type"] == "number":
+        inputs["urgent"] = 1
     assert input_problems(card, inputs) == []
-    assert coerce_inputs(card, inputs)["urgent"] == "true"
+    assert coerce_inputs(card, inputs)["urgent"] in {"true", "1"}
