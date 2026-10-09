@@ -70,7 +70,7 @@ class FlowCliStub:
         self.stdout = "stub stdout"
         self.stderr = ""
 
-    def __call__(self, cmd, capture_output=True, text=True, timeout=None):
+    def __call__(self, cmd, capture_output=True, text=True, timeout=None, **kwargs):
         import subprocess
 
         self.calls.append(list(cmd))

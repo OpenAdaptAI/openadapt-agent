@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 from conftest import FlowCliStub
@@ -292,7 +293,7 @@ def test_exit_two_is_governed_refusal(monkeypatch, runner_config, bundle_dir):
 
 
 def test_timeout_maps_to_timeout(monkeypatch, runner_config, bundle_dir):
-    def raise_timeout(cmd, capture_output=True, text=True, timeout=None):
+    def raise_timeout(cmd, capture_output=True, text=True, timeout=None, **kwargs):
         raise subprocess.TimeoutExpired(cmd, timeout, output=b"partial", stderr=b"")
 
     outcome = _run(monkeypatch, runner_config, raise_timeout, bundle_dir=bundle_dir)
@@ -302,7 +303,7 @@ def test_timeout_maps_to_timeout(monkeypatch, runner_config, bundle_dir):
 
 
 def test_missing_cli_maps_to_error(monkeypatch, runner_config, bundle_dir):
-    def raise_missing(cmd, capture_output=True, text=True, timeout=None):
+    def raise_missing(cmd, capture_output=True, text=True, timeout=None, **kwargs):
         raise FileNotFoundError(cmd[0])
 
     outcome = _run(monkeypatch, runner_config, raise_missing, bundle_dir=bundle_dir)
@@ -392,13 +393,41 @@ def test_refusal_carries_closed_failed_checks_not_flow_text():
 def test_launch_failure_is_a_platform_error_that_may_retry(
     monkeypatch, runner_config, bundle_dir
 ):
-    def raise_missing(cmd, capture_output=True, text=True, timeout=None):
+    def raise_missing(cmd, capture_output=True, text=True, timeout=None, **kwargs):
         raise FileNotFoundError(cmd[0])
 
     public = _run(monkeypatch, runner_config, raise_missing, bundle_dir=bundle_dir).to_dict()
     assert public["outcome"] == "did_not_run"
     assert public["reason"] == "platform_error"
     assert public["safe_to_retry"] is True
+
+
+def test_failure_after_flow_made_its_run_dir_is_uncertain_not_retryable(
+    monkeypatch, runner_config, bundle_dir
+):
+    def fail_after_start(cmd, capture_output=True, text=True, timeout=None, **kwargs):
+        # Flow created its run directory (so it started), then reading its
+        # output failed in this process.
+        Path(cmd[cmd.index("--run-dir") + 1]).mkdir(parents=True)
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    public = _run(monkeypatch, runner_config, fail_after_start, bundle_dir=bundle_dir).to_dict()
+    assert public["outcome"] == "not_sure_if_saved"
+    assert public["safe_to_retry"] is False
+
+
+def test_flow_output_is_decoded_without_strict_errors(
+    monkeypatch, runner_config, bundle_dir, success_report
+):
+    stub = FlowCliStub(exit_code=0, report=success_report)
+    seen = {}
+
+    def capture(cmd, **kwargs):
+        seen.update(kwargs)
+        return stub(cmd)
+
+    _run(monkeypatch, runner_config, capture, bundle_dir=bundle_dir)
+    assert seen.get("errors") == "replace"
 
 
 def test_pre_allocated_run_id_is_used(monkeypatch, runner_config, bundle_dir, success_report):

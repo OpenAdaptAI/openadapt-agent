@@ -596,10 +596,14 @@ class FlowRunner:
                 json.dump({k: str(v) for k, v in (params or {}).items()}, fh)
             cmd = self._build_command(Path(bundle_dir), run_dir, params_file, url)
             try:
+                # Decode with replacement: a strict decode error would surface
+                # after Flow already ran and read as a launch failure.
                 proc = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=self.config.timeout_s,
                 )
             except subprocess.TimeoutExpired as exc:
@@ -617,12 +621,8 @@ class FlowRunner:
                         "target system may be in a partially-executed state; "
                         "inspect the run directory before retrying."
                     ),
-                    stdout_tail=_tail(
-                        exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-                    ),
-                    stderr_tail=_tail(
-                        exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-                    ),
+                    stdout_tail=_tail(_text(exc.stdout)),
+                    stderr_tail=_tail(_text(exc.stderr)),
                 )
             except FileNotFoundError:
                 return RunOutcome(
@@ -638,16 +638,18 @@ class FlowRunner:
                 )
             except (OSError, subprocess.SubprocessError, ValueError) as exc:
                 # subprocess.run raises these while creating the child, so
-                # the governed run never started.
+                # the governed run normally never started. If Flow already
+                # made its run directory, it did start and may have acted.
                 _LOG.exception("governed Flow subprocess failed locally")
+                started = run_dir.exists()
                 return RunOutcome(
                     status="error",
                     workflow=workflow,
                     run_id=run_id,
                     run_dir=str(run_dir),
                     report_path=(str(report_path) if report_path.exists() else None),
-                    reason="platform_error",
-                    process_started=False,
+                    reason="result_unreadable" if started else "platform_error",
+                    process_started=None if started else False,
                     detail=f"{type(exc).__name__}: {exc}",
                 )
         finally:
@@ -714,6 +716,13 @@ class FlowRunner:
             "exit_code": proc.returncode,
             "detail": _tail(proc.stdout or "") or _tail(proc.stderr or ""),
         }
+
+
+def _text(value: object) -> str:
+    """Captured process output as text, never raising on odd bytes."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value if isinstance(value, str) else ""
 
 
 def is_safe_run_id(run_id: str) -> bool:
