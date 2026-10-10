@@ -388,6 +388,14 @@ class ThreadOwnedSession:
             self._owner.stop()
 
 
+def _is_coach_only_session(session: object) -> bool:
+    """True for the coach-only stand-in, even behind its owner thread."""
+
+    if isinstance(session, ThreadOwnedSession):
+        session = object.__getattribute__(session, "_session")
+    return isinstance(session, CoachOnlySession)
+
+
 def discover_desktop_authoring_ipc(*, home: Optional[Path] = None) -> Optional[dict[str, Any]]:
     """Return Desktop authoring IPC discovery when D2 has advertised it.
 
@@ -915,7 +923,7 @@ class AuthoringBridge:
         self._out_dir = Path(out_dir) if out_dir is not None else None
         self._last_tool: Optional[str] = None
         self._last_result: Optional[dict[str, Any]] = None
-        self._coach_only = isinstance(session, CoachOnlySession)
+        self._coach_only = _is_coach_only_session(session)
         self._nodes: dict[str, dict[str, Any]] = {}
         self._coach_hint: Optional[str] = None
 

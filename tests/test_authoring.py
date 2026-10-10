@@ -1012,6 +1012,26 @@ def test_url_session_refusal_stops_the_owner_thread(monkeypatch, tmp_path):
     assert {thread.name for thread in threading.enumerate()} <= before
 
 
+def test_url_coach_only_fallback_still_refuses_type_behind_owner_thread(
+    monkeypatch, tmp_path
+):
+    """Windows --url that cannot pin a browser stays coach-only, not "recorded"."""
+
+    install_fake_playwright_flow(monkeypatch)
+    session = open_authoring_session(
+        out_dir=tmp_path, url="http://127.0.0.1:9/", headed=False, platform="win32"
+    )
+    try:
+        bridge = AuthoringBridge(session, out_dir=tmp_path)
+        with pytest.raises(AuthoringError, match="COACH_ONLY"):
+            bridge.dispatch("type", {"text": "hello"})
+        with pytest.raises(AuthoringError, match="COACH_ONLY"):
+            bridge.dispatch("click", {"x": 1, "y": 2})
+    finally:
+        closer = getattr(session, "close", None)
+        if callable(closer):
+            closer()
+
 
 def test_url_session_construction_failure_closes_the_browser(monkeypatch, tmp_path):
     import sys
@@ -1032,6 +1052,7 @@ def test_url_session_construction_failure_closes_the_browser(monkeypatch, tmp_pa
         assert {thread.name for thread in threading.enumerate()} <= before
     finally:
         release_main_thread_loop(launched)
+
 
 _DEMO_PAGE = b"""<!doctype html><html><head><title>Demo</title></head><body>
 <label for="note">Note</label><input id="note" aria-label="Note">
