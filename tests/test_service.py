@@ -205,6 +205,42 @@ def test_review_resolved_by_a_person_updates_get_run(
     assert run(bridge)["outcome"] == "done"
 
 
+def test_continued_pause_never_turns_into_a_retryable_result(
+    monkeypatch, bundles_root, runner_config, halt_report, success_report
+):
+    """Regression: a reviewed run must never invite a second write.
+
+    When a person continues a pause, Flow clears the pause just before it
+    replaces the pre-resume report. A get_run in that moment sees no pause
+    and the old REJECTED_POLICY report. That must not become a retryable
+    did_not_run, or the same request_id would start a second attempt while
+    the resumed run writes.
+    """
+    halt_report["transaction_outcome"] = "REJECTED_POLICY"
+    stub = FlowCliStub(exit_code=1, report=halt_report)
+    monkeypatch.setattr(runner_mod.subprocess, "run", stub)
+    bridge = make_bridge(bundles_root, runner_config)
+    pause = {
+        "item": {"id": "a1", "status": "pending", "durably_paused": True, "category": "identity"}
+    }
+    monkeypatch.setattr(bridge.attended, "for_run_dir", lambda run_dir: pause["item"])
+    paused = run(bridge)
+    assert paused["outcome"] == "needs_review"
+
+    pause["item"] = {"id": "a1", "status": "halted", "durably_paused": False, "category": "identity"}
+    during = bridge.dispatch("get_run", {"run_id": paused["run_id"]})
+    assert during["outcome"] == "needs_review"
+    assert during["safe_to_retry"] is False
+    assert run(bridge)["run_id"] == paused["run_id"]
+    assert len(stub.calls) == 1
+
+    # The resumed run's report lands, and get_run reports it.
+    report_path = runner_config.runs_dir / paused["run_id"] / "report.json"
+    report_path.write_text(json.dumps(success_report))
+    pause["item"] = None
+    assert bridge.dispatch("get_run", {"run_id": paused["run_id"]})["outcome"] == "done"
+
+
 def test_get_run_rejects_unknown_and_unsafe_ids(bundles_root, runner_config):
     bridge = make_bridge(bundles_root, runner_config)
     with pytest.raises(BridgeError):

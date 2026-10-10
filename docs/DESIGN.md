@@ -178,7 +178,10 @@ are never stored; a keyed fingerprint of `(workflow, inputs)` is.
 `outcome: "running"` with its `run_id`. `get_run` waits the same way. A
 record left `running` by a process that is gone reads as `interrupted`. A
 `needs_review` result is re-read from Flow on each `get_run`, so a
-person's Continue or Reject shows up.
+person's Continue or Reject shows up. A re-read never turns a reviewed run
+into a retryable result: Flow clears a continued pause just before it
+replaces the pre-resume report, so the run keeps waiting until the new
+report lands.
 
 ### Workflow cards
 

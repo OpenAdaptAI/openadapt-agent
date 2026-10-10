@@ -405,6 +405,12 @@ class RunService:
             return result
         if update is None or update.reason == result.get("reason") or update.reason not in REASONS:
             return result
+        if REASONS[update.reason].safe_to_retry:
+            # A reviewed run only leaves review through a person's decision.
+            # Flow clears a continued pause just before it replaces the
+            # pre-resume report, so a no-effect report with no pause can be
+            # stale. Keep waiting rather than invite a second write.
+            return result
         fresh = self._result(
             update.reason,
             record,
