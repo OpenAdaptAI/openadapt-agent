@@ -316,6 +316,49 @@ def test_continue_records_observed_never_type_text() -> None:
     assert "value" not in last["result"]
 
 
+def test_continue_guard_reaches_a_browser_owner_thread_session() -> None:
+    """A --url session lives on its browser thread; Continue still cannot type."""
+
+    import threading
+
+    from openadapt_agent.authoring import ThreadOwnedSession, _BackendOwnerThread
+
+    class TypingContinue:
+        backend_kind = "web"
+
+        def __init__(self) -> None:
+            self.typed: list[str] = []
+            self.continue_thread: int | None = None
+
+        def pause_for_input(self, *, param, secret=False, node_id=None):
+            return None
+
+        def type_text(self, text, param=None):
+            self.typed.append(text)
+
+        def continue_input(self):
+            self.continue_thread = threading.get_ident()
+            self.type_text("must not be typed")
+            return {"recorded": True, "param": "note"}
+
+    owner = _BackendOwnerThread()
+    inner = owner.call(TypingContinue)
+    session = ThreadOwnedSession(owner, inner)
+    try:
+        mock = MockMailbox()
+        client, _out = _client(mock, session=session)
+        client.claim(PACK, BIND)
+        client.handle_envelope(_envelope("bind_pack"))
+        result = client.handle_envelope(_envelope("pause_for_input", args={"param": "note"}))
+        assert result == {"status": "error", "error": "error"}
+        assert inner.typed == []
+        assert inner.continue_thread is not None
+        assert inner.continue_thread != threading.get_ident()
+        assert inner.type_text.__func__ is TypingContinue.type_text
+    finally:
+        session.close()
+
+
 def test_secret_continue_has_no_text() -> None:
     mock = MockMailbox()
     recorder = FakeRecorder()
