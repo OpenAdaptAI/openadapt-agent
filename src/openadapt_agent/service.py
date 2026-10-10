@@ -197,6 +197,10 @@ class RunService:
         self.require_all_inputs = require_all_inputs
         self._active: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
+        # Reserving a request and marking its run active happen together, so a
+        # concurrent call with the same request_id never finds the new run
+        # unowned in the moment before its worker starts.
+        self._begin_lock = threading.Lock()
 
     # -- helpers -----------------------------------------------------------
 
@@ -270,9 +274,14 @@ class RunService:
                 workflow=entry.name,
                 invalid_inputs=problems,
             )
-        begin = self.store.begin(
-            request_id=request_id, workflow=entry.name, inputs=inputs, mode=self.mode
-        )
+        event = threading.Event()
+        with self._begin_lock:
+            begin = self.store.begin(
+                request_id=request_id, workflow=entry.name, inputs=inputs, mode=self.mode
+            )
+            if begin.kind == "new":
+                with self._lock:
+                    self._active[begin.run_id] = event
         if begin.kind == "conflict":
             return self._refuse(
                 "request_id_conflict",
@@ -293,7 +302,15 @@ class RunService:
                 }
                 return {**self._result("running", placeholder), "replayed": True}
             return self.get(begin.run_id, wait_seconds=wait, replayed=True)
-        self._start(entry, begin.record, coerce_inputs(entry.card, inputs), inputs)
+        try:
+            self._start(entry, begin.record, coerce_inputs(entry.card, inputs), inputs, event)
+        except BaseException:
+            # No worker owns the run, so get_run reports it as interrupted
+            # (check the record), never as running forever.
+            with self._lock:
+                self._active.pop(begin.run_id, None)
+            event.set()
+            raise
         return self.get(begin.run_id, wait_seconds=wait)
 
     def _start(
@@ -302,11 +319,10 @@ class RunService:
         record: dict[str, Any],
         rendered: dict[str, str],
         raw: Mapping[str, Any],
+        event: threading.Event,
     ) -> None:
-        event = threading.Event()
+        """Run one reserved attempt on a worker; ``run`` already marked it active."""
         run_id = record["run_id"]
-        with self._lock:
-            self._active[run_id] = event
 
         def work() -> None:
             try:

@@ -352,6 +352,38 @@ def test_a_run_finishing_during_get_is_never_marked_interrupted(
     assert final["outcome"] == "done"
 
 
+def test_same_request_id_while_a_run_is_starting_waits_instead_of_interrupting(
+    monkeypatch, bundles_root, runner_config, success_report
+):
+    """Regression: a concurrent replay must not see a new run as abandoned."""
+    import threading
+
+    stub = FlowCliStub(exit_code=0, report=success_report)
+    monkeypatch.setattr(runner_mod.subprocess, "run", stub)
+    bridge = make_bridge(bundles_root, runner_config)
+    service = bridge.service
+    real_start = service._start
+    starting = threading.Event()
+
+    def slow_start(*args, **kwargs):
+        starting.set()
+        time.sleep(0.3)  # the moment between reserving and starting the worker
+        return real_start(*args, **kwargs)
+
+    monkeypatch.setattr(service, "_start", slow_start)
+    results = {}
+    first = threading.Thread(target=lambda: results.setdefault("first", run(bridge)))
+    first.start()
+    assert starting.wait(5)
+    second = run(bridge)
+    first.join(10)
+    assert results["first"]["outcome"] == "done"
+    assert second["outcome"] == "done", second
+    assert second["replayed"] is True
+    assert second["run_id"] == results["first"]["run_id"]
+    assert len(stub.calls) == 1
+
+
 def test_orphaned_run_reads_as_interrupted_through_get_run(bundles_root, runner_config):
     bridge = make_bridge(bundles_root, runner_config)
     store = bridge.service.store
