@@ -27,9 +27,9 @@ Your agent sends the name of a saved task, the values to enter, and its own id f
 | Read the document and decide what to enter | Your agent | Your agent |
 | Open the app and find the right record | Staff | OpenAdapt, which confirms it has the right record before it types |
 | Type the values and save | Staff, re-keying your agent's output | OpenAdapt, in the same screens staff use |
-| Confirm the entry saved | Usually nobody, unless a spot check catches it | OpenAdapt reads the saved record back before it reports done |
-| Something doesn't match | Found later, or not at all | OpenAdapt stops and a person decides |
-| What staff handle | Every item | Only the items that stopped |
+| Confirm the entry saved | Staff, if they look again after saving | OpenAdapt reads the saved record back before it reports done |
+| Something doesn't match | Staff notice it while typing, or it's found later | OpenAdapt stops and a person decides |
+| What staff handle | Every item | Only the items that stopped or need a record check |
 
 For scale, two hospital time studies put keying one faxed referral into an EHR at about 10 to 12 minutes ([UCSF, JAMIA Open 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7660949/); [Calderdale and Huddersfield NHS Foundation Trust, HFMA 2024](https://www.hfma.org.uk/system/files/2024-04/Using%20digital%20technologies%20to%20process%20admin%20tasks%20Case%20Study%20v7.pdf)). This page doesn't estimate time saved. Measure it on your own workflow.
 
@@ -101,7 +101,7 @@ PyPI has openadapt-agent 2.0.1, which predates the sandbox. From version 2.0.2 o
 claude mcp add openadapt -- uvx --python 3.12 openadapt-agent serve
 ```
 
-Then ask your agent something like: "Use OpenAdapt to add the triage note 'Synthetic: recheck blood pressure in 2 weeks' with request id demo-0001. Then try the false_saved_banner case."
+Then ask your agent something like: "Use OpenAdapt to add the triage note 'Synthetic: recheck blood pressure in 2 weeks' with request id demo-0001. Then try the false_saved_banner case with request id demo-0002."
 
 | `sandbox_case` | `outcome` | What the synthetic app does |
 | --- | --- | --- |
