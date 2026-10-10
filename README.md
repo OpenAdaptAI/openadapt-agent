@@ -31,7 +31,7 @@ Your agent sends the name of a saved task, the values to enter, and its own id f
 | Something doesn't match | Found later, or not at all | OpenAdapt stops and a person decides |
 | What staff handle | Every item | Only the items that stopped |
 
-For scale, two hospital time studies put keying one faxed referral into an EHR at about 10 to 12 minutes (UCSF, JAMIA Open 2020; Calderdale and Huddersfield NHS Foundation Trust, HFMA 2024). This page doesn't estimate time saved. Measure it on your own workflow.
+For scale, two hospital time studies put keying one faxed referral into an EHR at about 10 to 12 minutes ([UCSF, JAMIA Open 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7660949/); [Calderdale and Huddersfield NHS Foundation Trust, HFMA 2024](https://www.hfma.org.uk/system/files/2024-04/Using%20digital%20technologies%20to%20process%20admin%20tasks%20Case%20Study%20v7.pdf)). This page doesn't estimate time saved. Measure it on your own workflow.
 
 ## What your agent gets back
 
@@ -56,7 +56,7 @@ Your agent needs three calls.
 
 `request_id` is your own id for the piece of work, such as the referral id. It's required. If your agent sends the same `request_id` again, it gets the first result back and nothing is entered a second time. A new attempt starts only when the first one proved nothing was written.
 
-Here is a real result from the sandbox. The synthetic app saved the note and then showed an error, so OpenAdapt can't confirm the save and says so:
+Here is a real result from the sandbox, with some fields left out. The synthetic app saved the note and then showed an error, so OpenAdapt can't confirm the save and says so:
 
 ```json
 {

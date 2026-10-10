@@ -285,7 +285,7 @@ class SandboxEngine:
             info["engine_detail"] = (
                 "Results are simulated without opening the app. To drive the "
                 "synthetic app in a hidden browser, install the tutorial extra: "
-                "uvx --from 'openadapt-agent[tutorial]' openadapt-agent serve"
+                "uvx --python 3.12 --from 'openadapt-agent[tutorial]' openadapt-agent serve"
             )
         return info
 
