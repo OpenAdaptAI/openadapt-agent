@@ -1307,3 +1307,21 @@ def test_pin_native_darwin_missing_quartz_names_dependency(fake_mac, monkeypatch
     message = str(exc_info.value)
     assert "pyobjc" in message
     assert "openadapt-flow[macos]" in message
+
+
+def test_pin_native_darwin_front_window_not_listed_is_not_called_a_shared_title(
+    fake_mac, monkeypatch
+):
+    # find_windows skips windows with no size, so the front window can be
+    # missing from its app's list. That isn't "more than one window".
+    class _HidesFront(fake_mac):
+        def find_windows(self, owner, title):
+            return [w for w in super().find_windows(owner, title) if w.window_id != self.front]
+
+    monkeypatch.setattr(
+        "openadapt_flow.backends.remote_display.MacWindowClient", _HidesFront
+    )
+    with pytest.raises(AuthoringError, match="didn't list the frontmost window") as exc_info:
+        pin_local_backend(platform="darwin")
+    assert "same title" not in str(exc_info.value)
+    assert "Inbox - Clinic" not in str(exc_info.value)

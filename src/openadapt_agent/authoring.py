@@ -573,10 +573,16 @@ def _try_pin_native(plat: str) -> Optional[tuple[Any, str, Any]]:
                     "Security), or close the app's other windows, or pass --url "
                     "URL --headed."
                 )
+            if len(candidates) > 1:
+                raise AuthoringError(
+                    "More than one window of the frontmost app has the same title, "
+                    "so OpenAdapt won't guess which one to use. Close the others, "
+                    "or pass --url URL --headed."
+                )
             raise AuthoringError(
-                "More than one window of the frontmost app has the same title, so "
-                "OpenAdapt won't guess which one to use. Close the others, or pass "
-                "--url URL --headed."
+                "macOS didn't list the frontmost window among its app's windows, "
+                "so OpenAdapt won't guess which one to use. Bring the app's window "
+                "to the front and try again, or pass --url URL --headed."
             )
         return MacOSBackend(client, app=app, window_title=title or None), "macos", None
     if plat.startswith("linux"):
