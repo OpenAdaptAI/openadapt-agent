@@ -218,7 +218,12 @@ def build_server(
             *(authoring.list_tool_specs() if authoring is not None else ()),
         )
 
-    async def _list_tools() -> list[types.Tool]:
+    async def _list_tools(context: Any = None) -> list[types.Tool]:
+        # A client that can't show a confirmation form would only ever get a
+        # refusal from an attended decision tool, so it isn't offered one.
+        # The call-time check in _call_tool still applies.
+        session = getattr(context, "session", None)
+        hide_attended = session is not None and not client_supports_form_elicitation(session)
         return [
             types.Tool(
                 name=spec.name,
@@ -233,6 +238,7 @@ def build_server(
                 **({"_meta": spec.meta} if spec.meta is not None else {}),
             )
             for spec in _tool_specs()
+            if not (hide_attended and spec.name in ATTENDED_TOOLS)
         ]
 
     async def _call_tool(
@@ -310,7 +316,11 @@ def build_server(
 
     if hasattr(Server, "list_tools"):
         server = Server(SERVER_NAME, instructions=_server_instructions(authoring, bridge))
-        server.list_tools()(_list_tools)
+
+        async def _list_v1() -> list[types.Tool]:
+            return await _list_tools(server.request_context)
+
+        server.list_tools()(_list_v1)
 
         async def _call_v1(name: str, arguments: dict[str, Any] | None):
             return await _call_tool(server.request_context, name, arguments)
@@ -320,7 +330,7 @@ def build_server(
     else:
 
         async def _list_v2(context: Any, params: Any) -> types.ListToolsResult:
-            return types.ListToolsResult(tools=await _list_tools())
+            return types.ListToolsResult(tools=await _list_tools(context))
 
         async def _call_v2(context: Any, params: types.CallToolRequestParams):
             return await _call_tool(context, params.name, params.arguments)

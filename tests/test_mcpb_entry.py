@@ -67,3 +67,37 @@ def test_mcpb_rejects_incomplete_or_ambiguous_configuration(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         build_argv(environment)
+
+
+# -- B086: the MCPB passes the certifying policy and ties env to user config ---
+
+
+def test_mcpb_passes_the_certifying_policy() -> None:
+    argv = build_argv(
+        {"OPENADAPT_AGENT_BUNDLES_DIR": "/b", "OPENADAPT_AGENT_POLICY": "clinical-write"}
+    )
+    index = argv.index("--policy")
+    assert argv[index + 1] == "clinical-write"
+    assert "--policy" not in build_argv(
+        {"OPENADAPT_AGENT_BUNDLES_DIR": "/b", "OPENADAPT_AGENT_POLICY": "  "}
+    )
+
+
+def test_every_mcpb_variable_is_wired_to_user_config() -> None:
+    import json
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    env = manifest["server"]["mcp_config"]["env"]
+    user_config = manifest["user_config"]
+    source = (root / "src" / "openadapt_agent" / "mcpb_entry.py").read_text(encoding="utf-8")
+    read = set(re.findall(r'"(OPENADAPT_AGENT_[A-Z_]+)"', source))
+    assert "OPENADAPT_AGENT_POLICY" in read
+    for name in read:
+        assert name in env, name
+        match = re.fullmatch(r"\$\{user_config\.([a-z_]+)\}", env[name])
+        assert match is not None, name
+        assert match.group(1) in user_config, name
+    assert "form elicitation" in user_config["allow_attended_actions"]["description"]

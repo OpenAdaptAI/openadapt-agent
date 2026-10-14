@@ -640,6 +640,11 @@ class AgentBridge:
             message = "The configured policy certification passed."
         elif certified is False:
             message = "The configured policy certification did not pass."
+        elif not (self.runner_config.policy or self.runner_config.deployment_config):
+            message = (
+                "Certification was not evaluated: this server has no certifying "
+                "policy. The operator sets one with --policy or --config."
+            )
         else:
             message = "Certification was not evaluated by this server."
         result = {"certified": certified, "message": message}

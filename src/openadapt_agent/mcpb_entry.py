@@ -40,6 +40,9 @@ def build_argv(environ: Mapping[str, str]) -> list[str]:
     deployment_config = environ.get("OPENADAPT_AGENT_DEPLOYMENT_CONFIG", "").strip()
     if deployment_config:
         argv.extend(("--config", deployment_config))
+    policy = environ.get("OPENADAPT_AGENT_POLICY", "").strip()
+    if policy:
+        argv.extend(("--policy", policy))
     if _boolean(environ, "OPENADAPT_AGENT_HEADED"):
         argv.append("--headed")
 

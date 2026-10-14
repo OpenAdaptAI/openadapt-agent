@@ -610,3 +610,11 @@ def test_plain_workflow_keeps_the_url_override_name(
     assert result["status"] == "success"
     cmd = stub.calls[0]
     assert cmd[cmd.index("--url") + 1] == "https://staging.example"
+
+
+def test_certification_without_a_policy_says_how_to_set_one(bundles_root, runner_config):
+    # B086: an MCPB install without a policy got an unexplained "not evaluated".
+    bridge = AgentBridge(bundles_root, runner_config)
+    info = bridge.dispatch("get_workflow", {"workflow": workflow_id(bridge)})
+    assert info["certification"]["certified"] is None
+    assert "--policy" in info["certification"]["message"]

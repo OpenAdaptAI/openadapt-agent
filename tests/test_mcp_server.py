@@ -96,8 +96,11 @@ def test_server_exports_reject_as_a_destructive_local_mutation(
         )
     )
 
+    async def elicit(context, params):
+        return types.ElicitResult(action="decline", content={})
+
     async def reject_tool():
-        async with mcp_client(server) as client:
+        async with mcp_client(server, elicitation_callback=elicit) as client:
             return next(
                 t
                 for t in wire(await client.list_tools())["tools"]
@@ -255,7 +258,7 @@ def test_invalid_arguments_never_confirm_or_dispatch(
 
 
 @pytest.mark.skipif(not hasattr(ClientSession, "discover"), reason="MCP 2 protocol only")
-def test_modern_discovery_preserves_tools_and_refuses_unavailable_confirmation(
+def test_modern_discovery_hides_unconfirmable_tools_and_still_refuses_them(
     monkeypatch,
     bundles_root,
     runner_config,
@@ -274,7 +277,9 @@ def test_modern_discovery_preserves_tools_and_refuses_unavailable_confirmation(
             return names, wire(result)
 
     names, result = anyio.run(probe)
-    assert "continue_attention" in names
+    assert "list_needs_attention" in names
+    assert "continue_attention" not in names
+    # Called anyway, the call-time check still refuses before dispatch.
     assert result["isError"] is True
     assert "form elicitation" in result["content"][0]["text"]
     assert calls == []
@@ -443,3 +448,30 @@ def test_elicitation_capability_check_is_backward_compatible(capabilities, suppo
         with pytest.raises(BridgeError, match="form elicitation"):
             anyio.run(confirm)
         assert session.prompts == []
+
+
+@pytest.mark.parametrize("elicitation", [False, True])
+def test_attended_tools_are_listed_only_for_clients_that_can_confirm(
+    elicitation, bundles_root, runner_config, mcp_client
+):
+    # B086: a client that can't show a confirmation form never sees a
+    # decision tool that would always refuse.
+    bridge = AgentBridge(
+        bundles_root, runner_config, allow_attended_actions=True, attended_service=object()
+    )
+
+    async def elicit(context, params):
+        return types.ElicitResult(action="decline", content={})
+
+    async def list_names():
+        kwargs = {"elicitation_callback": elicit} if elicitation else {}
+        async with mcp_client(build_server(bridge), **kwargs) as client:
+            return [t.name for t in (await client.list_tools()).tools]
+
+    names = anyio.run(list_names)
+    assert "list_needs_attention" in names
+    listed = set(ATTENDED_TOOLS) & set(names)
+    if elicitation:
+        assert listed == set(ATTENDED_TOOLS)
+    else:
+        assert listed == set()
