@@ -29,6 +29,7 @@ from jsonschema import ValidationError, validate
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
+from openadapt_agent import __version__
 from openadapt_agent.attended import ATTENDED_TOOLS
 from openadapt_agent.authoring import AuthoringBridge
 from openadapt_agent.bridge import AgentBridge, BridgeError
@@ -317,7 +318,12 @@ def build_server(
         return types.CallToolResult(content=text)
 
     if hasattr(Server, "list_tools"):
-        server = Server(SERVER_NAME, instructions=_server_instructions(authoring, bridge))
+        # Without version=, MCP 1 reports its own SDK version as serverInfo.
+        server = Server(
+            SERVER_NAME,
+            version=__version__,
+            instructions=_server_instructions(authoring, bridge),
+        )
 
         async def _list_v1() -> list[types.Tool]:
             return await _list_tools(server.request_context)
@@ -337,8 +343,10 @@ def build_server(
         async def _call_v2(context: Any, params: types.CallToolRequestParams):
             return await _call_tool(context, params.name, params.arguments)
 
+        # Without version=, MCP 2 reports an empty serverInfo.version.
         server = Server(
             SERVER_NAME,
+            version=__version__,
             instructions=_server_instructions(authoring, bridge),
             on_list_tools=_list_v2,
             on_call_tool=_call_v2,

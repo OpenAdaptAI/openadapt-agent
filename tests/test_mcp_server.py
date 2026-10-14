@@ -475,3 +475,32 @@ def test_attended_tools_are_listed_only_for_clients_that_can_confirm(
         assert listed == set(ATTENDED_TOOLS)
     else:
         assert listed == set()
+
+
+@pytest.mark.parametrize("authoring", [False, True])
+def test_initialize_reports_the_package_version(authoring, bundles_root, runner_config):
+    # B091: without version=, the SDK reported its own version (MCP 1) or an
+    # empty string (MCP 2) as serverInfo.version.
+    from mcp.shared.memory import create_client_server_memory_streams
+
+    from openadapt_agent import __version__
+    from openadapt_agent.authoring import AuthoringBridge
+
+    if authoring:
+        server = build_server(None, authoring=AuthoringBridge(_CompiledDraftSession()))
+    else:
+        server = build_server(AgentBridge(bundles_root, runner_config))
+    assert server.create_initialization_options().server_version == __version__
+
+    async def initialize():
+        with anyio.fail_after(10):
+            async with create_client_server_memory_streams() as (client, transport):
+                async with anyio.create_task_group() as tasks:
+                    tasks.start_soon(server.run, *transport, server.create_initialization_options())
+                    async with ClientSession(*client) as session:
+                        result = wire(await session.initialize())
+                    tasks.cancel_scope.cancel()
+        return result
+
+    server_info = anyio.run(initialize)["serverInfo"]
+    assert server_info == {**server_info, "name": "openadapt-agent", "version": __version__}
