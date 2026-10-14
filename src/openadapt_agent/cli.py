@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from openadapt_agent import __version__
+from openadapt_agent.contract import APPROVAL_MODES
 from openadapt_agent.runner import RunnerConfig, default_runs_dir
 
 __all__ = ["build_parser", "main"]
@@ -177,6 +178,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=600.0,
         metavar="SECONDS",
         help="Per-call timeout for each governed run (default: 600)",
+    )
+    p.add_argument(
+        "--approval-mode",
+        choices=APPROVAL_MODES,
+        default=None,
+        help=(
+            "Per-save approval passed to every `openadapt-flow run`. Unset "
+            "(the default): Flow decides, and under the Standard and Regulated "
+            "profiles a person approves each save (each_item); a run waiting "
+            "for that approval reports needs_review. not_gated turns the pause "
+            "off for every run this server starts, and each run's result and "
+            "Flow's report record that. Callers can't change it."
+        ),
     )
     p.add_argument(
         "--allow-url-override",
@@ -360,6 +374,24 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.approval_mode and mode not in {"production", "attended"}:
+        print(
+            "serve: --approval-mode applies to runs of your workflows; it needs "
+            "--mode production or --mode attended with --bundles",
+            file=sys.stderr,
+        )
+        return 2
+    if args.approval_mode and not args.flow_cli:
+        from openadapt_agent import approval
+
+        if not approval.flow_supports_approval_modes():
+            print(
+                "serve: --approval-mode needs an openadapt-flow with approval "
+                "modes; the one installed here has none, so its runs have no "
+                "per-save pause to set",
+                file=sys.stderr,
+            )
+            return 2
     if args.allow_synthetic_recorded_defaults and not (args.allow_run and args.bundles):
         print(
             "serve: --allow-synthetic-recorded-defaults requires --allow-run",
@@ -451,6 +483,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             timeout_s=args.timeout,
             allow_url_override=args.allow_url_override,
             extra_run_args=tuple(extra_run_args),
+            approval_mode=args.approval_mode,
         )
         with open_attended_service(
             enabled=args.allow_attended_actions,
@@ -482,7 +515,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
                 "synthetic recorded defaults "
                 f"{'ENABLED' if args.allow_synthetic_recorded_defaults else 'disabled'}; "
                 f"authoring {'enabled' if authoring_bridge is not None else 'disabled'}; "
-                f"runs folder {runs_dir}",
+                + (
+                    f"approval mode {args.approval_mode} (chosen with --approval-mode); "
+                    if args.approval_mode
+                    else "approval mode set by Flow (a person approves each save "
+                    "under the Standard and Regulated profiles); "
+                )
+                + f"runs folder {runs_dir}",
                 file=sys.stderr,
             )
             _serve(serve, bridge, authoring_bridge)

@@ -124,7 +124,7 @@ Until 2.0.2 is on PyPI, use the command above even if your agent suggests a shor
 | `outcome` (label) | What happened | What your agent does next |
 | --- | --- | --- |
 | `done` (Done and checked) | OpenAdapt saved the values and read the record back. | Mark the request complete and keep the `run_id`. Don't send it again. |
-| `needs_review` (Stopped before saving) | It stopped before saving. Nothing was written. The run waits until someone at your customer's computer finds it and decides. | Don't start the same work again. Call `get_run` later to see the decision. |
+| `needs_review` (Stopped before saving) | It stopped before a save, and the run waits until someone at your customer's computer decides. Nothing was written, unless `record_changed` is `unknown`: while a run waits for a person to approve a save (label Waiting for approval), an earlier save in that run may have gone through. | Don't start the same work again. Call `get_run` later to see the decision. |
 | `not_sure_if_saved` (Check the record) | A save may have gone through, but OpenAdapt couldn't confirm it. | Never retry. Have a person check the record in the app. |
 | `did_not_run` (Didn't run) | This call wrote nothing. With `request_id_conflict`, an earlier request with the same `request_id` may have saved. | If `safe_to_retry` is true, fix the cause and resend the same request. Otherwise follow `next_action`. |
 | `running` (Running) | The run didn't finish within `wait_seconds` (default 60). | Call `get_run` with the `run_id` until `outcome` changes. |
@@ -264,12 +264,17 @@ Flow's [execution profiles](https://github.com/OpenAdaptAI/openadapt-flow/blob/m
 | `--url URL` | The app's address, passed to every Flow run. |
 | `--config YAML` | Flow's deployment config ([example](https://github.com/OpenAdaptAI/openadapt-flow/blob/main/docs/deployment.example.yaml)), which sets the profile and whether model grounding is allowed. |
 | `--policy NAME-OR-PATH` | The policy Flow certifies against, such as `clinical-write` or `permissive`. |
-| `--timeout SECONDS` | How long one run may take (default 600). A run stopped at the limit is `not_sure_if_saved`. |
+| `--timeout SECONDS` | How long one run may work (default 600). Time a person spends approving a save doesn't count. A run stopped at the limit is `not_sure_if_saved`. |
+| `--approval-mode MODE` | Whether a person approves each save. Without it, Flow decides: under `standard` and `regulated` a run stops before each save until a person approves it (`each_item`). `not_gated` turns that off for every run this server starts; each result records it under `technical.approval_mode`. |
 | `--headed` | Shows the browser. A person needs it to continue or skip a stopped run in a web app. |
 | `--extra-run-arg ARG`, `--flow-cli CMD` | Change how Flow is called. Either one can relax Flow's checks, for example `--extra-run-arg=--allow-unencrypted`. |
 | `--allow-protected-export`, `--allow-synthetic-recorded-defaults`, `--allow-model-grounding` | Off by default. See [Security](#security). |
 
-Callers can't change `--url`, `--config`, `--policy`, or `--timeout`. The one exception is `url` on the deprecated tools, when the server has `--allow-url-override`. If a workflow has its own input named `url`, that argument stays the workflow's input and the override is `target_url_override`. `openadapt-agent serve --help` lists every flag.
+Callers can't change `--url`, `--config`, `--policy`, `--timeout`, or `--approval-mode`. The one exception is `url` on the deprecated tools, when the server has `--allow-url-override`. If a workflow has its own input named `url`, that argument stays the workflow's input and the override is `target_url_override`. `openadapt-agent serve --help` lists every flag.
+
+### Runs that wait for a person's approval
+
+Under `standard` and `regulated`, Flow stops before each save and waits for a person to approve it (up to 15 minutes by default). While it waits, `run_workflow` and `get_run` return `needs_review` with reason `waiting_for_approval` and `record_changed: "unknown"`, because an earlier save in the same run may have gone through. The person sees the waiting save with `openadapt-flow item-approval show RUN_DIR`, where `RUN_DIR` is the `run_id` folder in the runs folder, and answers with `item-approval approve` or `decline`. If nobody answers in time, the run stops before saving and reads `needs_review` with reason `approval_needed`. This server has no tool that approves a save: a person does.
 
 ### Use the other tools
 

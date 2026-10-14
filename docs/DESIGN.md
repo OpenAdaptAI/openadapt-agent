@@ -128,13 +128,15 @@ pause, and a consistency check of the persisted report:
 |---|---|---|
 | consistent `VERIFIED`, exit 0 | `saved_and_checked` | `done` |
 | `HALTED_BEFORE_EFFECT` | from the pause category, for example `record_not_confirmed` | `needs_review` |
+| a proven-no-effect outcome whose report says the item stopped for a person's approval (`approval.decision: approval_required`) | `approval_needed` | `needs_review` |
+| a run still going whose save waits for a person's approval (an unanswered `item-approval` request) | `waiting_for_approval`, `record_changed: "unknown"`, never stored as the result | `needs_review` |
 | `REJECTED_POLICY`, `CANCELED`, `FAILED_PLATFORM` with an open durable pause | from the pause category | `needs_review` |
 | the same with no open pause | `policy_refused`, `canceled`, `platform_error` | `did_not_run` |
 | any proven-no-effect outcome whose pause a person rejected | `stopped_by_person` | `did_not_run` (no retry) |
 | `RECONCILIATION_REQUIRED` | `save_not_confirmed` | `not_sure_if_saved` |
 | `COMPLETED_UNVERIFIED` | `not_checked` | `not_sure_if_saved` |
 | `ROLLED_BACK` | `change_reversed` | `not_sure_if_saved` |
-| timeout after start, inconsistent or missing report, coarse `HALTED` alone | `timed_out`, `result_unreadable` | `not_sure_if_saved` |
+| timeout after start (time a person spends approving doesn't count), inconsistent or missing report, coarse `HALTED` alone | `timed_out`, `result_unreadable` | `not_sure_if_saved` |
 | a server that stopped mid-run | `interrupted` | `not_sure_if_saved` |
 | exit 2 before execution | `not_ready_to_run` with closed `failed_checks` | `did_not_run` |
 | Flow could not be launched | `platform_error` | `did_not_run` |

@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from openadapt_agent.approval import report_approval
 from openadapt_agent.attended import (
     ATTENDED_TOOLS,
     AttendedBridge,
@@ -691,6 +692,7 @@ class AgentBridge:
             transaction_outcome=transaction if isinstance(transaction, str) else None,
             reason=reason,
             summary=public_report_summary(report),
+            approval_mode=report_approval(report)[0] or self.runner_config.approval_mode,
         )
         result = outcome.to_dict()
         result.pop("workflow_id", None)
