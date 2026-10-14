@@ -72,6 +72,24 @@ _CONFIRMATION_COPY = {
 HUMAN_CONFIRMED_TOOLS = frozenset({*ATTENDED_TOOLS, "admit"})
 
 
+def client_supports_form_elicitation(session: Any) -> bool:
+    """Whether the connected client said it can show an elicitation form.
+
+    MCP 2025-11-25 treats an empty ``elicitation`` object as form support, and
+    clients written for 2025-06-18 (which had no ``form``/``url`` keys) always
+    send it that way. Only a client that declares ``url`` alone, or no
+    elicitation at all, can't show a form.
+    """
+    params = getattr(session, "client_params", None)
+    capabilities = getattr(params, "capabilities", None)
+    elicitation = getattr(capabilities, "elicitation", None)
+    if elicitation is None or not getattr(session, "can_send_request", True):
+        return False
+    form = getattr(elicitation, "form", None)
+    url = getattr(elicitation, "url", None)
+    return form is not None or url is None
+
+
 async def _confirm_with_person(
     context: Any,
     message: str,
@@ -82,13 +100,7 @@ async def _confirm_with_person(
 ) -> None:
     """Ask the person through protocol-native form elicitation, or refuse."""
     session = context.session
-    params = session.client_params
-    elicitation = params.capabilities.elicitation if params is not None else None
-    if (
-        elicitation is None
-        or elicitation.form is None
-        or not getattr(session, "can_send_request", True)
-    ):
+    if not client_supports_form_elicitation(session):
         raise BridgeError(unsupported)
     result = await session.elicit_form(
         message,

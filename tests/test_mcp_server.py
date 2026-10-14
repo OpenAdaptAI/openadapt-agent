@@ -387,3 +387,59 @@ def test_admit_requires_form_elicitation(answer, mcp_client):
     else:
         assert len(prompts) == 1
         assert "no draft was accepted" in result["content"][0]["text"]
+
+
+class _StubElicitSession:
+    """Just enough of a server session to drive the confirmation gate."""
+
+    def __init__(self, capabilities):
+        self.client_params = types.InitializeRequestParams.model_validate(
+            {
+                "protocolVersion": "2025-06-18",
+                "capabilities": capabilities,
+                "clientInfo": {"name": "stub", "version": "0"},
+            }
+        )
+        self.can_send_request = True
+        self.prompts = []
+
+    async def elicit_form(self, message, schema, related_request_id=None):
+        self.prompts.append(message)
+        return types.ElicitResult(action="accept", content={"confirmed": True})
+
+
+class _StubContext:
+    def __init__(self, session):
+        self.session = session
+        self.request_id = 1
+
+
+@pytest.mark.parametrize(
+    "capabilities,supported",
+    [
+        # MCP 2025-11-25: an empty elicitation object means form mode. Clients
+        # written for 2025-06-18 always send it this way.
+        ({"elicitation": {}}, True),
+        ({"elicitation": {"form": {}}}, True),
+        ({"elicitation": {"form": {}, "url": {}}}, True),
+        ({"elicitation": {"url": {}}}, False),
+        ({}, False),
+    ],
+)
+def test_elicitation_capability_check_is_backward_compatible(capabilities, supported):
+    # B083
+    from openadapt_agent.bridge import BridgeError
+    from openadapt_agent.mcp import _confirm_attended_action
+
+    session = _StubElicitSession(capabilities)
+
+    async def confirm():
+        await _confirm_attended_action(_StubContext(session), "continue_attention")
+
+    if supported:
+        anyio.run(confirm)
+        assert len(session.prompts) == 1
+    else:
+        with pytest.raises(BridgeError, match="form elicitation"):
+            anyio.run(confirm)
+        assert session.prompts == []
