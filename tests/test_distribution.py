@@ -293,12 +293,32 @@ def test_identity_sentence_is_shared() -> None:
     assert "serve --authoring" in llms
     assert "authoring connect" in readme
     assert "authoring connect" in llms
-    assert "openadapt connect" in readme
     assert "https://openadapt.ai/start" in readme
     assert "https://openadapt.ai/start" in llms
     assert "openadapt flow tutorial" in readme
     assert "openadapt quickstart --break-it" in readme
     assert "name: computer-use" not in readme.lower()
+
+
+# The launcher's `openadapt connect` is Cloud pairing. It takes no positional
+# argument, so `openadapt connect '<runner-link>'` exits 2.
+_CLOUD_PAIRING_WITH_RUNNER_LINK = re.compile(r"(?<![\w-])openadapt connect\s+['\"<]")
+
+
+def test_runner_link_docs_do_not_use_cloud_pairing_command() -> None:
+    # B088: docs told pip users to pass a runner link to `openadapt connect`.
+    docs = [README, LLMS_TXT, *sorted((REPO_ROOT / "docs").rglob("*.md"))]
+    docs += sorted((REPO_ROOT / "skills").rglob("*.md"))
+    docs += sorted((REPO_ROOT / "src" / "openadapt_agent").rglob("*.py"))
+    offenders = [
+        f"{path.relative_to(REPO_ROOT)}:{number}"
+        for path in docs
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if _CLOUD_PAIRING_WITH_RUNNER_LINK.search(line)
+    ]
+    assert offenders == []
+    mailbox = (REPO_ROOT / "docs" / "MAILBOX_CLI.md").read_text(encoding="utf-8")
+    assert "pip: openadapt-agent authoring connect '<runner-link>'" in mailbox
 
 
 def test_readme_leads_with_the_partner_contract() -> None:
