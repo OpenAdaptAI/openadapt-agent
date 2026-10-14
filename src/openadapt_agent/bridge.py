@@ -47,6 +47,7 @@ from openadapt_agent.bundles import (
     WorkflowInfo,
     discover_bundles,
     tool_input_schema,
+    url_override_key,
 )
 from openadapt_agent.cards import card_for_bundle, inputs_schema
 from openadapt_agent.contract import (
@@ -733,7 +734,9 @@ class AgentBridge:
                 )
             raise BridgeError("the selected workflow could not be loaded safely")
         arguments = dict(arguments)
-        url_override = arguments.pop("url", None)
+        # A declared "url" parameter stays a workflow input; the override then
+        # has its own argument name (see bundles.url_override_key).
+        url_override = arguments.pop(url_override_key(info), None)
         unknown = set(arguments) - set(info.params)
         missing = set(info.params) - set(arguments)
         invalid_types = any(not isinstance(value, str) for value in arguments.values()) or (

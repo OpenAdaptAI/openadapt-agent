@@ -269,7 +269,7 @@ Flow's [execution profiles](https://github.com/OpenAdaptAI/openadapt-flow/blob/m
 | `--extra-run-arg ARG`, `--flow-cli CMD` | Change how Flow is called. Either one can relax Flow's checks, for example `--extra-run-arg=--allow-unencrypted`. |
 | `--allow-protected-export`, `--allow-synthetic-recorded-defaults`, `--allow-model-grounding` | Off by default. See [Security](#security). |
 
-Callers can't change `--url`, `--config`, `--policy`, or `--timeout`. The one exception is `url` on the deprecated tools, when the server has `--allow-url-override`. `openadapt-agent serve --help` lists every flag.
+Callers can't change `--url`, `--config`, `--policy`, or `--timeout`. The one exception is `url` on the deprecated tools, when the server has `--allow-url-override`. If a workflow has its own input named `url`, that argument stays the workflow's input and the override is `target_url_override`. `openadapt-agent serve --help` lists every flag.
 
 ### Use the other tools
 
