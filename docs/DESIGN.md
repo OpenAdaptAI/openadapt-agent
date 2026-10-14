@@ -236,10 +236,12 @@ typing through Flow's Recorder. Hosted MCP remains pause-only. Human
 type during `pause_for_input` is persisted with `Recorder.record_observed`
 on the pause-target node, never `type_text`. `compile` wraps Flow
 `compile_recording` and returns `needs_human_admit`; an agent click never
-paints `VERIFIED`. `admit` is the one-token human ok of the pre-filled
-draft; the human does not fill schema, authority, effect, environment, or
-digest. If the Flow session has no `admit`, the tool fails closed and does
-not mint a Seal or write an unsigned ledger row.
+paints `VERIFIED`. `admit` asks the person to accept the pre-filled
+draft through MCP form elicitation; the human does not fill schema,
+authority, effect, environment, or digest. The tool takes no arguments, so
+the calling agent can't supply the acceptance, and a client without form
+elicitation is refused. If the Flow session has no `admit`, the tool fails
+closed and does not mint a Seal or write an unsigned ledger row.
 
 `--authoring` does not imply `--allow-run`. `--bundles` is optional iff
 `--authoring` (or the sandbox). The
@@ -506,8 +508,8 @@ Tests cover:
   and local `type`; observe projection drops values/titles/screenshots
   and extra keys, caps the wire at 32 KiB, and uses `n_` + 8 hex node
   ids; pause Continue uses `record_observed` rather than `type_text`;
-  compile returns `needs_human_admit`; `admit` is the one-token human
-  ok; `--authoring` does not enable
+  compile returns `needs_human_admit`; `admit` needs the person's answer
+  in a form-elicitation prompt; `--authoring` does not enable
   run tools; `server.json` stays stdio with `--bundles` required;
   `authoring connect` parses `openadapt://runner` / pack URLs, claims
   `oab_`, polls `wait_seconds: 0`, prompts Allow-per-`sub`, and Continue

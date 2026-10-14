@@ -33,7 +33,7 @@ from openadapt_agent.attended import ATTENDED_TOOLS
 from openadapt_agent.authoring import AuthoringBridge
 from openadapt_agent.bridge import AgentBridge, BridgeError
 
-__all__ = ["build_server", "serve"]
+__all__ = ["HUMAN_CONFIRMED_TOOLS", "build_server", "serve"]
 
 SERVER_NAME = "openadapt-agent"
 _LOG = logging.getLogger(__name__)
@@ -67,8 +67,20 @@ _CONFIRMATION_COPY = {
 }
 
 
-async def _confirm_attended_action(context: Any, name: str) -> None:
-    """Require a second, protocol-native human confirmation before mutation."""
+#: Tools that change state only after a person confirms in the client's own
+#: form. A model-supplied argument never stands in for that answer.
+HUMAN_CONFIRMED_TOOLS = frozenset({*ATTENDED_TOOLS, "admit"})
+
+
+async def _confirm_with_person(
+    context: Any,
+    message: str,
+    *,
+    title: str,
+    unsupported: str,
+    declined: str,
+) -> None:
+    """Ask the person through protocol-native form elicitation, or refuse."""
     session = context.session
     params = session.client_params
     elicitation = params.capabilities.elicitation if params is not None else None
@@ -77,19 +89,15 @@ async def _confirm_attended_action(context: Any, name: str) -> None:
         or elicitation.form is None
         or not getattr(session, "can_send_request", True)
     ):
-        raise BridgeError(
-            "attended actions require an MCP client with form elicitation so "
-            "the local operator can confirm this exact decision; use Flow's "
-            "attended console/CLI when the client does not support elicitation"
-        )
+        raise BridgeError(unsupported)
     result = await session.elicit_form(
-        _CONFIRMATION_COPY[name],
+        message,
         {
             "type": "object",
             "properties": {
                 "confirmed": {
                     "type": "boolean",
-                    "title": "I confirm this attended action",
+                    "title": title,
                 }
             },
             "required": ["confirmed"],
@@ -98,9 +106,37 @@ async def _confirm_attended_action(context: Any, name: str) -> None:
     )
     content = result.content or {}
     if result.action != "accept" or content.get("confirmed") is not True:
-        raise BridgeError(
-            "the local operator declined or cancelled; no attended action was submitted"
-        )
+        raise BridgeError(declined)
+
+
+async def _confirm_attended_action(context: Any, name: str) -> None:
+    """Require a second, protocol-native human confirmation before mutation."""
+    await _confirm_with_person(
+        context,
+        _CONFIRMATION_COPY[name],
+        title="I confirm this attended action",
+        unsupported=(
+            "attended actions require an MCP client with form elicitation so "
+            "the local operator can confirm this exact decision; use Flow's "
+            "attended console/CLI when the client does not support elicitation"
+        ),
+        declined="the local operator declined or cancelled; no attended action was submitted",
+    )
+
+
+async def _confirm_admit(context: Any, authoring: AuthoringBridge) -> None:
+    """A person, not the calling agent, accepts a compiled draft."""
+    await _confirm_with_person(
+        context,
+        authoring.admit_confirmation_message(),
+        title="I reviewed this draft and accept it",
+        unsupported=(
+            "admit requires an MCP client with form elicitation so a person "
+            "can accept the draft; no draft was accepted. Use a client that "
+            "supports elicitation, or Flow's own authoring tools"
+        ),
+        declined="the person declined or cancelled; no draft was accepted",
+    )
 
 
 def _server_instructions(
@@ -146,8 +182,10 @@ def _server_instructions(
             "and halt over this same local stdio process. Local stdio may also "
             "type through the recorder; hosted MCP has no type tool. Human type "
             "during pause_for_input is record_observed, never type_text. "
-            "compile returns needs_human_admit; admit is the one-token human "
-            "ok. An agent click never paints VERIFIED. --authoring does not "
+            "compile returns needs_human_admit; admit then asks the person "
+            "to accept the draft in the client's own form, and an agent can't "
+            "accept it for them. An agent click never paints VERIFIED. "
+            "--authoring does not "
             "enable run tools. This process must not be port-forwarded or "
             "served over HTTP."
         )
@@ -202,12 +240,18 @@ def build_server(
                     getattr(spec, "usage", None)
                     or "tool arguments do not match the input schema"
                 ) from None
+            human_confirmed = False
             if name in ATTENDED_TOOLS:
                 await _confirm_attended_action(context, name)
+            elif name == "admit" and authoring is not None and authoring.handles(name):
+                await _confirm_admit(context, authoring)
+                human_confirmed = True
 
             def call() -> dict[str, Any]:
                 payload = dict(arguments or {})
                 if authoring is not None and authoring.handles(name):
+                    if human_confirmed:
+                        return authoring.dispatch(name, payload, human_confirmed=True)
                     return authoring.dispatch(name, payload)
                 if bridge is None:
                     raise BridgeError("unknown tool name")

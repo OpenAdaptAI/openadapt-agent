@@ -279,46 +279,67 @@ def test_compile_returns_needs_human_admit_never_verified():
     assert "success" not in result
 
 
-def test_admit_empty_confirm_and_ok_work_without_type_text():
+@pytest.mark.parametrize(
+    "arguments",
+    [{}, {"confirm": "ok"}, {"confirm": ""}, {"confirm": True}, {"confirm": "yes"}],
+)
+def test_admit_without_host_confirmation_refuses(arguments):
+    # B074: a model-supplied confirm (or none) is not a person's consent.
     session = FakeAuthoringSession()
     bridge = AuthoringBridge(session)
-    empty = bridge.dispatch("admit", {})
-    assert empty == {"status": "admitted", "workflow_id": "wf_demo0001"}
-    assert ("admit", None) in session.calls
-    ok = bridge.dispatch("admit", {"confirm": "ok"})
-    assert ok["status"] == "admitted"
+    bridge.dispatch("compile", {})
+    with pytest.raises(AuthoringError) as exc_info:
+        bridge.dispatch("admit", arguments)
+    assert exc_info.value.code == "admit_requires_host_confirmation"
+    assert all(not (isinstance(call, tuple) and call[0] == "admit") for call in session.calls)
+
+
+def test_admit_schema_does_not_invite_self_confirmation():
+    specs = AuthoringBridge(FakeAuthoringSession()).list_tool_specs()
+    spec = next(s for s in specs if s.name == "admit")
+    assert "confirm" not in spec.input_schema.get("properties", {})
+    assert spec.input_schema["additionalProperties"] is False
+    assert "ok, yes" not in spec.description
+    assert "one-token" not in spec.description
+    assert "person" in spec.description
+
+
+def test_admit_after_host_confirmation_works_without_type_text():
+    session = FakeAuthoringSession()
+    bridge = AuthoringBridge(session)
+    compiled = bridge.dispatch("compile", {})
+    assert compiled["status"] == "needs_human_admit"
+    assert "wf_demo0001" in bridge.admit_confirmation_message()
+    admitted = bridge.dispatch("admit", {}, human_confirmed=True)
+    assert admitted == {"status": "admitted", "workflow_id": "wf_demo0001"}
     assert ("admit", "ok") in session.calls
-    blank = bridge.dispatch("admit", {"confirm": ""})
-    assert blank["status"] == "admitted"
-    assert ("admit", "") in session.calls
-    true_ok = bridge.dispatch("admit", {"confirm": True})
-    assert true_ok["status"] == "admitted"
-    assert ("admit", True) in session.calls
-    for token in ("yes", "y", "enter", "OK"):
-        accepted = bridge.dispatch("admit", {"confirm": token})
-        assert accepted["status"] == "admitted"
-        assert ("admit", token) in session.calls
     assert session.typed_via_backend == []
     assert all(
         call[0] != "type_text" if isinstance(call, tuple) else call != "type_text"
         for call in session.calls
     )
-    compiled = bridge.dispatch("compile", {})
-    assert compiled["status"] == "needs_human_admit"
-    assert "VERIFIED" not in json.dumps(compiled)
-    assert "VERIFIED" not in json.dumps(empty)
-    assert "title" not in json.dumps(empty)
+    assert "VERIFIED" not in json.dumps(admitted)
+    assert "title" not in json.dumps(admitted)
 
 
-def test_admit_garbage_confirm_refuses():
+def test_admit_records_confirmation_channel_when_flow_accepts_it():
+    class ChannelSession(FakeAuthoringSession):
+        def admit(self, confirm=None, confirmation_channel=None):
+            self.calls.append(("admit", confirm, confirmation_channel))
+            return {"status": "accepted", "workflow_id": "wf_demo0001"}
+
+    session = ChannelSession()
+    bridge = AuthoringBridge(session)
+    bridge.dispatch("admit", {}, human_confirmed=True)
+    assert ("admit", "ok", "mcp_form_elicitation") in session.calls
+
+
+def test_admit_extra_arguments_refuse_even_after_confirmation():
     session = FakeAuthoringSession()
     bridge = AuthoringBridge(session)
-    with pytest.raises(AuthoringError, match="one-token ok"):
-        bridge.dispatch("admit", {"confirm": "ship-it"})
-    with pytest.raises(AuthoringError, match="one-token ok"):
-        bridge.dispatch("admit", {"confirm": False})
-    assert all(call != ("admit", "ship-it") for call in session.calls)
-    assert all(call != ("admit", False) for call in session.calls)
+    with pytest.raises(AuthoringError, match="schema"):
+        bridge.dispatch("admit", {"confirm": "ship-it"}, human_confirmed=True)
+    assert all(not (isinstance(call, tuple) and call[0] == "admit") for call in session.calls)
     assert session.typed_via_backend == []
 
 
@@ -336,7 +357,7 @@ def test_admit_fails_closed_without_session_admit():
     assert compiled["status"] == "needs_human_admit"
     assert "VERIFIED" not in json.dumps(compiled)
     with pytest.raises(AuthoringError, match="does not implement admit") as exc_info:
-        bridge.dispatch("admit", {"confirm": "ok"})
+        bridge.dispatch("admit", {}, human_confirmed=True)
     message = str(exc_info.value)
     assert "Seal" in message
     assert "unsigned" in message

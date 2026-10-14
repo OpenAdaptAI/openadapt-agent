@@ -197,8 +197,11 @@ _TYPE_FIELDS = frozenset({"text", "param", "node_id"})
 _PAUSE_FIELDS = frozenset({"node_id", "param", "secret"})
 _RESULT_FIELDS = frozenset({"command_id"})
 _COACH_FIELDS = frozenset({"hint"})
-_ADMIT_FIELDS = frozenset({"confirm"})
-_ADMIT_ACCEPT = frozenset({"", "ok", "yes", "y", "enter"})
+#: admit takes no arguments. A model-supplied token is not a person's
+#: consent; the MCP layer asks the person through form elicitation instead.
+_ADMIT_FIELDS: frozenset[str] = frozenset()
+#: How the person's acceptance was obtained, recorded by Flow when it can.
+ADMIT_CONFIRMATION_CHANNEL = "mcp_form_elicitation"
 
 _DESKTOP_IPC_RELATIVE = Path(".openadapt") / "desktop_ipc.json"
 
@@ -870,12 +873,25 @@ def _require_object(arguments: Optional[dict[str, Any]], allowed: set[str]) -> d
     return payload
 
 
-def _confirm_is_acceptance(value: Any) -> bool:
-    if value is None or value is True:
-        return True
-    if isinstance(value, str) and value.strip().lower() in _ADMIT_ACCEPT:
-        return True
-    return False
+def _accepts_keyword(func: Callable[..., Any], name: str) -> bool:
+    """Whether ``func`` takes keyword ``name`` (or any keyword)."""
+    import inspect
+
+    if isinstance(func, _OwnedCall):
+        func = func.target
+    try:
+        parameters = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        or (
+            parameter.name == name
+            and parameter.kind
+            in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        )
+        for parameter in parameters
+    )
 
 
 def _invoke(session: object, method: str, **kwargs: Any) -> Any:
@@ -926,9 +942,24 @@ class AuthoringBridge:
         self._coach_only = _is_coach_only_session(session)
         self._nodes: dict[str, dict[str, Any]] = {}
         self._coach_hint: Optional[str] = None
+        self._compiled_workflow_id: Optional[str] = None
 
     def handles(self, name: str) -> bool:
         return name in AUTHORING_TOOLS
+
+    def admit_confirmation_message(self) -> str:
+        """What the person is asked before admit records their acceptance."""
+        draft = (
+            f"the compiled draft {self._compiled_workflow_id}"
+            if self._compiled_workflow_id
+            else "the compiled draft"
+        )
+        return (
+            f"A person must review {draft} on this computer and confirm that "
+            "they accept it. This records your local acceptance only. It isn't "
+            "a signed receipt and doesn't make the workflow ready to run on "
+            "real records."
+        )
 
     def list_tool_specs(self) -> list[ToolSpec]:
         specs = [
@@ -1057,9 +1088,9 @@ class AuthoringBridge:
                 name="compile",
                 description=(
                     "Wrap Flow compile_recording and return needs_human_admit. "
-                    "A named human then calls admit with a one-token ok. "
-                    "An agent click never paints VERIFIED. Refuses a session "
-                    "that had a secret pause and no TYPE/param event."
+                    "Then call admit: the client asks the person to accept "
+                    "the draft. An agent click never paints VERIFIED. Refuses "
+                    "a session that had a secret pause and no TYPE/param event."
                 ),
                 input_schema=_EMPTY_OBJECT,
                 annotations={
@@ -1072,27 +1103,16 @@ class AuthoringBridge:
             ToolSpec(
                 name="admit",
                 description=(
-                    "One-step human admit of the pre-filled draft (schema, "
+                    "Ask the person to accept the pre-filled draft (schema, "
                     "authority, effect contract, environment, digest). The "
-                    "human does not fill those fields. Missing confirm, empty, "
-                    "ok, yes, y, enter, or true accepts. Any other confirm "
-                    "refuses. Does not mint a Seal or write an unsigned ledger "
-                    "row when the Flow session has no admit."
+                    "MCP client shows the person a confirmation form, and "
+                    "only their answer there accepts the draft: there is no "
+                    "argument an agent can send to accept it. Refuses when "
+                    "the client can't show a form or the person declines. "
+                    "Does not mint a Seal or write an unsigned ledger row "
+                    "when the Flow session has no admit."
                 ),
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "confirm": {
-                            "type": ["string", "boolean"],
-                            "description": (
-                                "Optional one-token ok. Omit, empty, ok, yes, "
-                                "y, enter, or true accepts. Anything else "
-                                "refuses."
-                            ),
-                        }
-                    },
-                    "additionalProperties": False,
-                },
+                input_schema=_EMPTY_OBJECT,
                 annotations={
                     "readOnlyHint": False,
                     "destructiveHint": False,
@@ -1157,12 +1177,29 @@ class AuthoringBridge:
         ]
         return specs
 
-    def dispatch(self, name: str, arguments: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def dispatch(
+        self,
+        name: str,
+        arguments: Optional[dict[str, Any]] = None,
+        *,
+        human_confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Run one authoring tool.
+
+        ``human_confirmed`` is set only by the transport after the person
+        accepted a host-mediated confirmation (MCP form elicitation). Only
+        ``admit`` reads it; nothing in ``arguments`` can stand in for it.
+        """
         if name not in AUTHORING_TOOLS:
             raise AuthoringError("unknown tool name")
         if name == "get_command_result":
             _require_object(arguments, _RESULT_FIELDS)
             return self._last_command_result()
+        if name == "admit":
+            result = self._admit(arguments, human_confirmed=human_confirmed is True)
+            self._last_tool = name
+            self._last_result = result
+            return result
         handlers = {
             "observe": self._observe,
             "start_record": self._start_record,
@@ -1173,7 +1210,6 @@ class AuthoringBridge:
             "continue_input": self._continue_input,
             "stop_record": self._stop_record,
             "compile": self._compile,
-            "admit": self._admit,
             "set_coach": self._set_coach,
             "get_coach": self._get_coach,
             "bind_status": self._bind_status,
@@ -1472,19 +1508,22 @@ class AuthoringBridge:
         }
         if isinstance(workflow_id, str) and workflow_id:
             public["workflow_id"] = workflow_id
+            self._compiled_workflow_id = workflow_id
         summary = _safe_label(result.get("summary"))
         if summary:
             public["summary"] = summary
         return public
 
-    def _admit(self, arguments: Optional[dict[str, Any]]) -> dict[str, Any]:
-        payload = _require_object(arguments, _ADMIT_FIELDS)
-        confirm = payload.get("confirm") if "confirm" in payload else None
-        if not _confirm_is_acceptance(confirm):
+    def _admit(
+        self, arguments: Optional[dict[str, Any]], *, human_confirmed: bool
+    ) -> dict[str, Any]:
+        if not human_confirmed:
             raise AuthoringError(
-                "admit refused: confirm is not a one-token ok",
-                code="admit_refused",
+                "admit refused: a person must accept the draft through the "
+                "MCP client's confirmation form; no draft was accepted",
+                code="admit_requires_host_confirmation",
             )
+        _require_object(arguments, set(_ADMIT_FIELDS))
         admit_fn = getattr(self.session, "admit", None)
         if not callable(admit_fn):
             raise AuthoringError(
@@ -1493,12 +1532,17 @@ class AuthoringBridge:
                 "ledger row, or claiming Production",
                 code="admit_unavailable",
             )
+        # The person accepted through the host, so Flow gets its own ok token
+        # and, when it records one, how the acceptance was obtained.
+        kwargs: dict[str, Any] = {"confirm": "ok"}
+        if _accepts_keyword(admit_fn, "confirmation_channel"):
+            kwargs["confirmation_channel"] = ADMIT_CONFIRMATION_CHANNEL
         try:
             try:
-                raw = admit_fn(confirm=confirm)
+                raw = admit_fn(**kwargs)
             except TypeError:
                 try:
-                    raw = admit_fn(confirm)
+                    raw = admit_fn("ok")
                 except TypeError:
                     raw = admit_fn()
         except Exception as exc:

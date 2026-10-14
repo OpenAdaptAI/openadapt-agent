@@ -331,3 +331,59 @@ def test_run_tool_preserves_real_flow_admission_refusal(bundles_root, tmp_path, 
     assert payload["success"] is False
     assert payload["sealed"] is False
     assert "protected" not in payload
+
+
+class _CompiledDraftSession:
+    """A Flow-like authoring session already compiled to needs_human_admit."""
+
+    def __init__(self):
+        self.admits = []
+
+    def compile(self):
+        return {"status": "needs_human_admit", "workflow_id": "wf_demo0001"}
+
+    def admit(self, confirm=None):
+        self.admits.append(confirm)
+        return {"status": "accepted", "workflow_id": "wf_demo0001"}
+
+
+@pytest.mark.parametrize("answer", ["accept", "decline", "cancel", "unconfirmed", "unsupported"])
+def test_admit_requires_form_elicitation(answer, mcp_client):
+    # B074: an agent must not be able to accept its own draft as a person.
+    from openadapt_agent.authoring import AuthoringBridge
+
+    session = _CompiledDraftSession()
+    authoring = AuthoringBridge(session)
+    prompts = []
+
+    async def elicit(context, params):
+        prompts.append(wire(params))
+        return types.ElicitResult(
+            action="accept" if answer == "unconfirmed" else answer,
+            content={"confirmed": answer == "accept"},
+        )
+
+    async def call():
+        kwargs = {} if answer == "unsupported" else {"elicitation_callback": elicit}
+        async with mcp_client(build_server(None, authoring=authoring), **kwargs) as client:
+            compiled = await client.call_tool("compile", {})
+            assert json.loads(compiled.content[0].text)["status"] == "needs_human_admit"
+            return wire(await client.call_tool("admit", {}))
+
+    result = anyio.run(call)
+    if answer == "accept":
+        assert result["isError"] is False
+        assert json.loads(result["content"][0]["text"])["status"] == "admitted"
+        assert session.admits == ["ok"]
+        assert len(prompts) == 1
+        assert "wf_demo0001" in prompts[0]["message"]
+        assert prompts[0]["requestedSchema"]["properties"]["confirmed"]["type"] == "boolean"
+        return
+    assert result["isError"] is True
+    assert session.admits == []
+    if answer == "unsupported":
+        assert prompts == []
+        assert "form elicitation" in result["content"][0]["text"]
+    else:
+        assert len(prompts) == 1
+        assert "no draft was accepted" in result["content"][0]["text"]

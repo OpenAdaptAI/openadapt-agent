@@ -327,7 +327,7 @@ This repository also ships a general skill for any workflow, [skills/openadapt-g
 
 2. Ask your agent to record the task with the person. When the agent pauses for sign-in, the person signs in to the app in that window.
 3. When the task is done, the agent calls `compile`. It writes the bundle to `<runs-dir>/authoring/bundle`, which is `./runs/authoring/bundle` by default.
-4. The person accepts the bundle, and the agent calls `admit`. This step doesn't check that a person, rather than the agent, accepted it.
+4. The agent calls `admit`. Your MCP client then shows the person a confirmation form, and only the person's answer there accepts the bundle. If the client can't show forms (MCP form elicitation), `admit` refuses and nothing is accepted.
 5. Get the bundle ready to run (see [Get a workflow ready to run](#get-a-workflow-ready-to-run)). Then serve it with `--mode production --bundles <runs-dir>/authoring/bundle`.
 
 Use `--url URL --headed` on every platform. Without `--url`, the server exits on Linux, and on macOS it uses whatever window is in front when the client starts the server, or exits. For Windows desktop apps, Citrix, and RDP, the recording tools can only tell the person what to click. Record those apps with Flow's own recorder.
