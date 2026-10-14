@@ -322,7 +322,7 @@ This repository also ships a general skill for any workflow, [skills/openadapt-g
 
 ### Record a first workflow
 
-`serve --authoring` adds recording tools, such as `observe`, `start_record`, `click`, `pause_for_input`, `stop_record`, `compile`, and `admit`. Your agent uses them to help a person record a task in a web app. The recording server doesn't turn on runs.
+`serve --authoring` adds recording tools, such as `observe`, `start_record`, `click`, `pause_for_input`, `stop_record`, `compile`, and `admit`. [docs/DESIGN.md](docs/DESIGN.md#recording-tools) lists all 14. Your agent uses them to help a person record a task in a web app. The recording server doesn't turn on runs.
 
 1. Add a recording server. `--url` opens the app in a new Chromium window with no saved sign-ins, and `--headed` keeps that window visible so the person can sign in.
 

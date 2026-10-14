@@ -231,10 +231,31 @@ operation:
   use demonstrated values. It requires run authority and is only for
   synthetic demos; it never places those values in a tool schema.
 
+### Recording tools
+
 `--authoring` registers first-demo tools over the same local stdio
 server. Probe names match hosted MCP: `observe`, `start_record`,
-`click`, `halt`. Local stdio may also include `type` for agent-driven
-typing through Flow's Recorder. Hosted MCP remains pause-only. Human
+`click`, `halt`. The rest are local stdio only. `AUTHORING_TOOLS` in
+`openadapt_agent.authoring` is the source of truth, in this order:
+
+| Tool | Group | What it does |
+| --- | --- | --- |
+| `observe` | probe | Returns a PHI-safe tree of the pinned window: no values, titles, URLs, screenshots, or pixels. |
+| `start_record` | probe | Starts a Flow Recorder session. Refused for Windows native, Citrix, and RDP, which are coach-only. |
+| `click` | probe | Clicks one observed node. Local stdio also accepts x,y pixels. |
+| `halt` | probe | Ends the authoring session without compiling. It isn't a governed run halt. |
+| `type` | local | Types text the agent supplies through `Recorder.type_text`. Not for secrets or for text a person typed. |
+| `pause_for_input` | local | Pauses so a person can type in the app. A secret pause stores no text. |
+| `continue_input` | local | Stands in for overlay Continue and saves the person's input with `Recorder.record_observed`. |
+| `stop_record` | local | Finishes the Recorder session without compiling. |
+| `compile` | local | Wraps Flow `compile_recording` and returns `needs_human_admit`. |
+| `admit` | local | Asks the person to accept the draft in a form-elicitation prompt. Refused when the client can't show one. |
+| `get_command_result` | local | Returns the last in-process result, for clients that expect the hosted `command_id` shape. |
+| `set_coach` | local | Stores a PHI-safe coach hint of up to 80 characters in this process. |
+| `get_coach` | local | Returns the last coach hint. |
+| `bind_status` | local | Reports local bind status. A stdio server is already on the machine, so there's no pack mailbox. |
+
+Hosted MCP remains pause-only: it has no `type`. Human
 type during `pause_for_input` is persisted with `Recorder.record_observed`
 on the pause-target node, never `type_text`. `compile` wraps Flow
 `compile_recording` and returns `needs_human_admit`; an agent click never
