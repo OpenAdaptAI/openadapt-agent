@@ -492,8 +492,43 @@ def _pin_web(url: str, *, headed: bool) -> tuple[Any, str, Any]:
     return backend, "web", close
 
 
+_MAC_DEPS_MISSING = (
+    "pinning the frontmost macOS window needs pyobjc (Quartz), which isn't "
+    "installed here. Install it with pip install 'openadapt-flow[macos]', "
+    "or reinstall openadapt-agent with the tutorial extra, which includes "
+    "it. Or pass --url URL --headed to record in a new Chromium window."
+)
+
+
+def _mac_window_owner_title(window_id: int) -> Optional[tuple[str, str]]:
+    """Owner and title of one window, read from the window server.
+
+    Flow's ``find_windows`` matches an exact owner, so it can't look a window
+    up by id; Quartz can. An empty title usually means macOS hides other
+    apps' window titles until Screen Recording is allowed.
+    """
+    import Quartz
+
+    rows = Quartz.CGWindowListCopyWindowInfo(
+        Quartz.kCGWindowListOptionIncludingWindow, window_id
+    )
+    for row in rows or []:
+        if int(row.get("kCGWindowNumber", 0) or 0) != int(window_id):
+            continue
+        owner = str(row.get("kCGWindowOwnerName", "") or "")
+        title = str(row.get("kCGWindowName", "") or "")
+        return owner, title
+    return None
+
+
 def _try_pin_native(plat: str) -> Optional[tuple[Any, str, Any]]:
-    """Best-effort unique frontmost window. None means caller should fail closed."""
+    """Pin the unique frontmost window.
+
+    Returns None when this Flow has no native backend for the platform.
+    Raises :class:`AuthoringError` naming the cause when a backend exists but
+    the frontmost window can't be pinned. Window titles never appear in the
+    error.
+    """
 
     if plat == "darwin":
         try:
@@ -501,29 +536,49 @@ def _try_pin_native(plat: str) -> Optional[tuple[Any, str, Any]]:
             from openadapt_flow.backends.remote_display import MacWindowClient
         except ImportError:
             return None
+        import importlib.util
+
+        try:
+            quartz = importlib.util.find_spec("Quartz")
+        except (ImportError, ValueError):
+            quartz = None
+        if quartz is None:
+            raise AuthoringError(_MAC_DEPS_MISSING)
         client = MacWindowClient()
         window_id = client.frontmost_window_id()
         if window_id is None:
-            return None
+            raise AuthoringError(
+                "No app window is in front. Bring the signed-in app's window to "
+                "the front, then start the server again, or pass --url URL --headed."
+            )
+        front = _mac_window_owner_title(window_id)
+        if front is None or not front[0]:
+            raise AuthoringError(
+                "macOS didn't say which app owns the frontmost window. Bring the "
+                "app's window to the front and try again, or pass --url URL --headed."
+            )
+        app, title = front
         finder = getattr(client, "find_windows", None)
         if not callable(finder):
             return None
-        matches = [item for item in finder("", None) if getattr(item, "window_id", None) == window_id]
-        if len(matches) != 1:
-            return None
-        info = matches[0]
-        app = getattr(info, "owner", None) or getattr(info, "app", None)
-        title = getattr(info, "title", None)
-        if not isinstance(app, str) or not app:
-            return None
-        same_title = [
-            item
-            for item in finder(app, title if isinstance(title, str) else None)
-            if getattr(item, "window_id", None)
+        candidates = [
+            item for item in finder(app, title or None) if getattr(item, "window_id", None)
         ]
-        if title and len(same_title) != 1:
-            return None
-        return MacOSBackend(client, app=app, window_title=title), "macos", None
+        if len(candidates) != 1 or candidates[0].window_id != window_id:
+            if not title:
+                raise AuthoringError(
+                    "macOS hid the window titles, so OpenAdapt can't tell this "
+                    "app's windows apart. Allow Screen Recording for the program "
+                    "that starts this server (System Settings > Privacy & "
+                    "Security), or close the app's other windows, or pass --url "
+                    "URL --headed."
+                )
+            raise AuthoringError(
+                "More than one window of the frontmost app has the same title, so "
+                "OpenAdapt won't guess which one to use. Close the others, or pass "
+                "--url URL --headed."
+            )
+        return MacOSBackend(client, app=app, window_title=title or None), "macos", None
     if plat.startswith("linux"):
         # Factory requires linux_app AND an exact unique title. Non-unique is
         # coach-only. Without a Desktop pin we cannot guess the app name.
