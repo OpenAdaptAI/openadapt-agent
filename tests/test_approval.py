@@ -286,3 +286,68 @@ def test_serve_records_an_operator_chosen_approval_mode(
     monkeypatch.setattr("openadapt_agent.approval.flow_supports_approval_modes", lambda: False)
     assert main([*argv, "--approval-mode", "not_gated"]) == 2
     assert "approval modes" in capsys.readouterr().err
+
+
+# -- a real Flow process that waits for a person -----------------------------------
+#
+# The tests above stub _run_flow_process. These start a real child process
+# that writes an approval request the way Flow does, so they also cover how the
+# runner and the service find that request in the run folder.
+
+_WAITING_FLOW = """
+import json, sys, time, uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+run_dir = Path(sys.argv[sys.argv.index("--run-dir") + 1])
+folder = run_dir / "item-approval"
+folder.mkdir(parents=True, exist_ok=True)
+request_id = uuid.uuid4().hex
+expires = datetime.now(timezone.utc) + timedelta(seconds=600)
+(folder / f"request-{request_id}.json").write_text(
+    json.dumps({"request_id": request_id, "expires_at": expires.isoformat()})
+)
+time.sleep(float(sys.argv[1]))
+(folder / f"answer-{request_id}.json").write_text("{}")
+(folder / f"consumed-{request_id}").write_text("consumed\\n")
+(run_dir / "report.json").write_text(json.dumps({
+    "workflow_name": "Demo Triage",
+    "success": True,
+    "execution_outcome": "VERIFIED",
+    "transaction_outcome": "VERIFIED",
+    "execution_profile": "standard",
+    "production_eligible": True,
+    "results": [],
+    "model_calls": 0,
+}))
+"""
+
+
+def _waiting_flow_config(tmp_path, *, person_seconds: float, timeout_s: float) -> RunnerConfig:
+    script = tmp_path / "waiting_flow.py"
+    script.write_text(_WAITING_FLOW)
+    return RunnerConfig(
+        flow_cli=(sys.executable, str(script), str(person_seconds)),
+        runs_dir=tmp_path / "runs",
+        timeout_s=timeout_s,
+    )
+
+
+def test_a_real_flow_process_waiting_for_a_person_is_not_killed(tmp_path, bundle_dir):
+    config = _waiting_flow_config(tmp_path, person_seconds=3.0, timeout_s=1.5)
+    outcome = FlowRunner(config).run(workflow="w", bundle_dir=bundle_dir, params={})
+    assert outcome.timed_out is False
+    assert outcome.status == "success"
+
+
+def test_run_workflow_reports_a_real_flow_process_waiting_for_a_person(
+    tmp_path, bundles_root
+):
+    config = _waiting_flow_config(tmp_path, person_seconds=3.0, timeout_s=30.0)
+    bridge = _bridge(bundles_root, config)
+    waiting = _run(bridge, wait=20)
+    assert waiting["outcome"] == "needs_review"
+    assert waiting["reason"] == "waiting_for_approval"
+    assert waiting["record_changed"] == "unknown"
+    done = bridge.dispatch("get_run", {"run_id": waiting["run_id"], "wait_seconds": 20})
+    assert done["outcome"] == "done"
