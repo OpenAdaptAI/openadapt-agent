@@ -614,7 +614,7 @@ def open_authoring_session(
             "record_observed, never type_text on the pause target)"
         ) from exc
     discover_desktop_authoring_ipc()
-    work_dir = Path(out_dir) if out_dir is not None else Path("runs") / "authoring"
+    work_dir = Path(out_dir) if out_dir is not None else _default_authoring_dir()
     options = dict(
         work_dir=work_dir,
         url=url,
@@ -926,6 +926,13 @@ def _require_object(arguments: Optional[dict[str, Any]], allowed: set[str]) -> d
     if unknown:
         raise AuthoringError("arguments do not match the declared authoring schema")
     return payload
+
+
+def _default_authoring_dir() -> Path:
+    """Where a recording goes when the caller names no folder (never cwd)."""
+    from openadapt_agent.runner import default_runs_dir
+
+    return default_runs_dir() / "authoring"
 
 
 def _accepts_keyword(func: Callable[..., Any], name: str) -> bool:
@@ -1537,7 +1544,7 @@ class AuthoringBridge:
 
     def _compile(self, arguments: Optional[dict[str, Any]]) -> dict[str, Any]:
         _require_object(arguments, set())
-        bundle_dir = (self._out_dir or Path("runs") / "authoring") / "bundle"
+        bundle_dir = (self._out_dir or _default_authoring_dir()) / "bundle"
         try:
             compile_fn = getattr(self.session, "compile", None)
             if not callable(compile_fn):

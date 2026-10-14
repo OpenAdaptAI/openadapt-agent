@@ -52,6 +52,7 @@ __all__ = [
     "classify_outcome",
     "classify_report_status",
     "default_flow_cli",
+    "default_runs_dir",
     "is_safe_run_id",
     "legacy_reason",
     "new_run_id",
@@ -137,12 +138,27 @@ def default_flow_cli() -> tuple[str, ...]:
     return (sys.executable, "-m", "openadapt_flow")
 
 
+def default_runs_dir() -> Path:
+    """One stable per-user folder for run records and Flow's evidence.
+
+    Never a path relative to the working directory: an MCP client starts the
+    server wherever the user's project is, and run evidence (reports, frames,
+    entered values) must not land in a repository where it can be committed,
+    nor scatter durable pauses across folders. ``OPENADAPT_AGENT_RUNS_DIR``
+    overrides it; the MCPB manifest sets that variable.
+    """
+    base = os.environ.get("OPENADAPT_AGENT_RUNS_DIR", "").strip()
+    if base:
+        return Path(base).expanduser()
+    return Path.home() / ".openadapt" / "runs"
+
+
 @dataclass(frozen=True)
 class RunnerConfig:
     """Operator-fixed execution settings (set at server start, not per call)."""
 
     flow_cli: tuple[str, ...] = field(default_factory=default_flow_cli)
-    runs_dir: Path = Path("runs")
+    runs_dir: Path = field(default_factory=default_runs_dir)
     url: Optional[str] = None
     deployment_config: Optional[str] = None  # --config YAML
     policy: Optional[str] = None  # --policy NAME-OR-PATH
@@ -585,7 +601,8 @@ class FlowRunner:
             url = url_override
 
         runs_root = Path(self.config.runs_dir)
-        runs_root.mkdir(parents=True, exist_ok=True)
+        # Run evidence can hold entered values and screenshots: owner-only.
+        runs_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         run_dir = runs_root / run_id
         report_path = run_dir / "report.json"
 

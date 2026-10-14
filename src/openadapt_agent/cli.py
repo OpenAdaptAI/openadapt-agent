@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from openadapt_agent import __version__
-from openadapt_agent.runner import RunnerConfig
+from openadapt_agent.runner import RunnerConfig, default_runs_dir
 
 __all__ = ["build_parser", "main"]
 
@@ -165,8 +165,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--runs-dir",
         default=None,
         help=(
-            "Directory for run records and evidence (default: ./runs; the "
-            "sandbox uses ~/.openadapt/agent-sandbox)"
+            "Directory for run records and evidence (default: "
+            "$OPENADAPT_AGENT_RUNS_DIR, else ~/.openadapt/runs; the sandbox "
+            "uses ~/.openadapt/agent-sandbox). Never relative to the folder "
+            "the client starts the server in."
         ),
     )
     p.add_argument(
@@ -379,7 +381,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
                 authoring_root = default_sandbox_dir()
             else:
-                authoring_root = Path("runs")
+                authoring_root = default_runs_dir()
             authoring_dir = authoring_root.expanduser().resolve() / "authoring"
             try:
                 authoring_bridge = AuthoringBridge(
@@ -435,9 +437,14 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             return 0
 
         extra_run_args = list(args.extra_run_arg)
+        # Resolve once, so every part of the server (runs, pauses, the
+        # request-id ledger) uses the same absolute folder.
+        runs_dir = (
+            Path(args.runs_dir) if args.runs_dir else default_runs_dir()
+        ).expanduser().resolve()
         runner_config = RunnerConfig(
             flow_cli=(tuple(shlex.split(args.flow_cli)) if args.flow_cli else default_flow_cli()),
-            runs_dir=Path(args.runs_dir or "runs"),
+            runs_dir=runs_dir,
             url=args.url,
             deployment_config=args.config,
             policy=args.policy,
@@ -474,7 +481,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
                 f"{'ENABLED' if args.allow_protected_export else 'disabled'}; "
                 "synthetic recorded defaults "
                 f"{'ENABLED' if args.allow_synthetic_recorded_defaults else 'disabled'}; "
-                f"authoring {'enabled' if authoring_bridge is not None else 'disabled'}",
+                f"authoring {'enabled' if authoring_bridge is not None else 'disabled'}; "
+                f"runs folder {runs_dir}",
                 file=sys.stderr,
             )
             _serve(serve, bridge, authoring_bridge)

@@ -260,7 +260,7 @@ Flow's [execution profiles](https://github.com/OpenAdaptAI/openadapt-flow/blob/m
 
 | Flag | What it does |
 | --- | --- |
-| `--runs-dir DIR` | Where run records and Flow's evidence go. The default is `./runs` in the folder where the client starts the server; the sandbox uses `~/.openadapt/agent-sandbox`. In production, pass an absolute path. The check that stops a second entry covers one runs folder, so two servers started from different folders could each enter the same request. |
+| `--runs-dir DIR` | Where run records and Flow's evidence go. The default is `~/.openadapt/runs` (or `OPENADAPT_AGENT_RUNS_DIR` when it's set), never the folder where the client starts the server; the sandbox uses `~/.openadapt/agent-sandbox`. The server prints the folder it uses when it starts. The check that stops a second entry covers one runs folder, so give every server for the same work the same folder. |
 | `--url URL` | The app's address, passed to every Flow run. |
 | `--config YAML` | Flow's deployment config ([example](https://github.com/OpenAdaptAI/openadapt-flow/blob/main/docs/deployment.example.yaml)), which sets the profile and whether model grounding is allowed. |
 | `--policy NAME-OR-PATH` | The policy Flow certifies against, such as `clinical-write` or `permissive`. |
@@ -326,7 +326,7 @@ This repository also ships a general skill for any workflow, [skills/openadapt-g
    ```
 
 2. Ask your agent to record the task with the person. When the agent pauses for sign-in, the person signs in to the app in that window.
-3. When the task is done, the agent calls `compile`. It writes the bundle to `<runs-dir>/authoring/bundle`, which is `./runs/authoring/bundle` by default.
+3. When the task is done, the agent calls `compile`. It writes the bundle to `<runs-dir>/authoring/bundle`, which is `~/.openadapt/runs/authoring/bundle` by default.
 4. The agent calls `admit`. Your MCP client then shows the person a confirmation form, and only the person's answer there accepts the bundle. If the client can't show forms (MCP form elicitation), `admit` refuses and nothing is accepted.
 5. Get the bundle ready to run (see [Get a workflow ready to run](#get-a-workflow-ready-to-run)). Then serve it with `--mode production --bundles <runs-dir>/authoring/bundle`.
 
