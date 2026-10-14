@@ -21,6 +21,7 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -331,6 +332,24 @@ def _resolve_mode(args: argparse.Namespace) -> Optional[str]:
     return "sandbox"
 
 
+def _legacy_runs_dir(args: argparse.Namespace) -> Optional[Path]:
+    """An earlier version's implicit ``./runs`` that this default would skip.
+
+    Before ~/.openadapt/runs, the default was ./runs in whatever folder the
+    client started the server. Its request-id ledger and pauses live there;
+    silently using a new folder would let a resent request_id run again. Only
+    checked when the operator named no folder.
+    """
+    if args.runs_dir or os.environ.get("OPENADAPT_AGENT_RUNS_DIR", "").strip():
+        return None
+    legacy = Path("runs").resolve()
+    if not (legacy / "openadapt-agent").is_dir():
+        return None
+    if legacy == default_runs_dir().expanduser().resolve():
+        return None
+    return legacy
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     from openadapt_agent.bridge import AgentBridge
     from openadapt_agent.flow_service import open_attended_service
@@ -395,6 +414,19 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     if args.allow_synthetic_recorded_defaults and not (args.allow_run and args.bundles):
         print(
             "serve: --allow-synthetic-recorded-defaults requires --allow-run",
+            file=sys.stderr,
+        )
+        return 2
+    legacy = _legacy_runs_dir(args) if mode in {"production", "attended"} else None
+    if legacy is not None:
+        default = default_runs_dir().expanduser().resolve()
+        print(
+            f"serve: {legacy} holds run records from an earlier version, which "
+            "kept them in the folder the server started in. This version keeps "
+            f"them in {default}, so it wouldn't know the request_ids sent before "
+            f"and could enter one of those requests again. Pass --runs-dir "
+            f"{legacy} to keep using that folder, or --runs-dir {default} to "
+            "start a new one.",
             file=sys.stderr,
         )
         return 2

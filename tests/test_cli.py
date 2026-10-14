@@ -373,3 +373,37 @@ def test_explicit_runs_dir_is_resolved_once(monkeypatch, bundles_root, tmp_path)
     argv = ["serve", "--mode", "production", "--bundles", str(bundles_root), "--runs-dir", "ev"]
     assert main(argv) == 0
     assert Path(captured["bridge"].runner_config.runs_dir) == (tmp_path / "ev").resolve()
+
+
+def test_serve_refuses_to_skip_an_earlier_versions_runs_folder(
+    monkeypatch, bundles_root, tmp_path, capsys
+):
+    # B082 upgrade: the old default kept the request-id ledger in ./runs. A
+    # server that silently used ~/.openadapt/runs instead would not know the
+    # request_ids sent before and could enter one of them again.
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake_attended(**kwargs):
+        yield None
+
+    project = tmp_path / "proj"
+    (project / "runs" / "openadapt-agent").mkdir(parents=True)
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("OPENADAPT_AGENT_RUNS_DIR", raising=False)
+    monkeypatch.setattr("openadapt_agent.flow_service.open_attended_service", fake_attended)
+    captured = _capture_serve(monkeypatch)
+    argv = ["serve", "--mode", "production", "--bundles", str(bundles_root)]
+
+    assert main(argv) == 2
+    err = capsys.readouterr().err
+    assert str((project / "runs").resolve()) in err
+    assert "--runs-dir" in err
+    assert "bridge" not in captured
+
+    # Naming a folder, either one, is the operator's explicit choice.
+    assert main([*argv, "--runs-dir", str(project / "runs")]) == 0
+    assert Path(captured["bridge"].runner_config.runs_dir) == (project / "runs").resolve()
+    monkeypatch.setenv("OPENADAPT_AGENT_RUNS_DIR", str(tmp_path / "home" / "new"))
+    assert main(argv) == 0
