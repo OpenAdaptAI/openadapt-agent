@@ -55,7 +55,7 @@ class FakeScrubber:
     """Stands in for openadapt-privacy: paints the whole image black."""
 
     def validate_ready(self, modalities):
-        assert modalities == ["image"]
+        assert modalities == ["PIL_IMAGE"]
 
     def scrub_image(self, image):
         return Image.new("RGB", image.size, (0, 0, 0))
@@ -387,3 +387,12 @@ def test_no_screen_configured_hides_tools(tmp_path: Path) -> None:
     assert not {"get_repair_screen", "teach_repair"} & _tools(bridge)
     block = _run(bridge)["needs_repair"]
     assert block["teach_repair_available"] is False
+
+
+def test_image_modality_matches_openadapt_privacy() -> None:
+    privacy = pytest.importorskip("openadapt_privacy.base")
+    from openadapt_agent.repair import IMAGE_MODALITY
+
+    assert IMAGE_MODALITY == privacy.Modality.PIL_IMAGE
+    provider = pytest.importorskip("openadapt_privacy").PresidioScrubbingProvider
+    assert IMAGE_MODALITY in provider.capabilities

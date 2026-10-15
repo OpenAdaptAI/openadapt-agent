@@ -302,6 +302,9 @@ class HeldRunDemonstrator:
             pass  # already gone; Flow's own timeout cleans up
 
 
+IMAGE_MODALITY = "PIL_IMAGE"
+
+
 def default_scrubber() -> Any:
     """openadapt-privacy's Presidio provider. Raises when it isn't usable."""
     from openadapt_privacy import PresidioScrubbingProvider
@@ -314,7 +317,8 @@ def scrub_png(png: bytes, scrubber_factory: Callable[[], Any]) -> tuple[bytes, d
     from PIL import Image
 
     provider = scrubber_factory()
-    provider.validate_ready(["image"])
+    # openadapt-privacy names this modality PIL_IMAGE (Modality.PIL_IMAGE).
+    provider.validate_ready([IMAGE_MODALITY])
     image = Image.open(io.BytesIO(png))
     image.load()
     scrubbed = provider.scrub_image(image)
@@ -322,7 +326,7 @@ def scrub_png(png: bytes, scrubber_factory: Callable[[], Any]) -> tuple[bytes, d
         raise RuntimeError("the scrubber returned no image")
     out = io.BytesIO()
     scrubbed.save(out, format="PNG")
-    evidence = provider.evidence(["image"])
+    evidence = provider.evidence([IMAGE_MODALITY])
     if evidence.get("status") != "completed":
         raise RuntimeError("the scrubber did not report a completed scrub")
     return out.getvalue(), {

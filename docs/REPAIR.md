@@ -53,7 +53,7 @@ without a person's name, counts as `off`.
 | `allow_unscrubbed` | See the screen without scrubbing. The CLI asks the person to type `share unscrubbed` at a terminal before it saves this setting. |
 
 If scrubbing fails, or `openadapt-privacy` isn't installed, no screen is
-shared. Install it with `pip install "openadapt-agent[repair-screens]"`.
+shared. Install it with `pip install "openadapt-agent[repair-screens]"`, then the spaCy model openadapt-privacy loads: `python -m spacy download en_core_web_sm`. Image scrubbing also needs the Tesseract binary that Presidio's image redactor calls.
 
 `approve-screen` and `repair access --screens allow_unscrubbed` refuse to run
 without a terminal, so a script piping input can't approve. An agent that has
