@@ -48,4 +48,6 @@ TUTORIAL_REQUIREMENT = (
     "openadapt-agent[tutorial] @ git+https://github.com/OpenAdaptAI/openadapt-agent"
 )
 #: Starts the sandbox with the real engine. The README shows the same command.
-TUTORIAL_SERVE_COMMAND = f"uvx --python 3.12 --from '{TUTORIAL_REQUIREMENT}' openadapt-agent serve"
+TUTORIAL_SERVE_COMMAND = (
+    f"uvx --python 3.12 --from '{TUTORIAL_REQUIREMENT}' openadapt-agent serve"
+)

@@ -82,9 +82,7 @@ def test_reused_request_id_with_different_inputs_is_a_conflict(store):
 
 def test_records_never_hold_input_values(store, tmp_path):
     secret = "Jane Roe MRN 8812345"
-    first = store.begin(
-        request_id="req-0001", workflow="w", inputs={"a": secret}, mode="production"
-    )
+    first = store.begin(request_id="req-0001", workflow="w", inputs={"a": secret}, mode="production")
     finish(store, first, "saved_and_checked")
     for path in (tmp_path / "runs" / "openadapt-agent").rglob("*.json"):
         assert secret not in path.read_text()

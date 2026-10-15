@@ -288,7 +288,8 @@ class RunService:
     ) -> dict[str, Any]:
         if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
             raise ServiceError(
-                "request_id must be 4 to 128 letters, digits, '.', '_', ':' or '-'. Nothing ran."
+                "request_id must be 4 to 128 letters, digits, '.', '_', ':' or '-'. "
+                "Nothing ran."
             )
         wait = self._wait_seconds(wait_seconds, DEFAULT_WAIT_SECONDS)
         entry = self.catalog.get(workflow) if isinstance(workflow, str) else None
@@ -388,7 +389,9 @@ class RunService:
                     approval_mode=outcome.approval_mode,
                 )
                 self._offer_repair(entry, record, outcome, result)
-                self.store.finish(record, result, transaction_outcome=outcome.transaction_outcome)
+                self.store.finish(
+                    record, result, transaction_outcome=outcome.transaction_outcome
+                )
             except Exception:
                 _LOG.exception("could not persist a run result")
             finally:

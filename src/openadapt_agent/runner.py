@@ -92,8 +92,6 @@ _STATUS_FALLBACK_REASONS = {
     "timeout": "timed_out",
     "error": "result_unreadable",
 }
-
-
 def legacy_reason(
     status: str,
     execution_outcome: Optional[str] = None,

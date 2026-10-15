@@ -271,7 +271,8 @@ REASONS: dict[str, Reason] = {
         False,
         "unknown",
         "check_record",
-        "The run ended without a result OpenAdapt can trust. The change may or may not be saved.",
+        "The run ended without a result OpenAdapt can trust. The change may "
+        "or may not be saved.",
         _CHECK_RECORD,
     ),
     "interrupted": Reason(
@@ -298,7 +299,8 @@ REASONS: dict[str, Reason] = {
         True,
         "no",
         "fix_inputs",
-        "Didn't start because there's no workflow with that name here. Nothing was written.",
+        "Didn't start because there's no workflow with that name here. "
+        "Nothing was written.",
         "Call list_workflows and use one of the names it returns.",
     ),
     "workflow_unavailable": Reason(
@@ -306,7 +308,8 @@ REASONS: dict[str, Reason] = {
         True,
         "no",
         "fix_setup",
-        "Didn't start because this workflow can't be loaded on this computer. Nothing was written.",
+        "Didn't start because this workflow can't be loaded on this computer. "
+        "Nothing was written.",
         "Ask the operator to check the workflow files on this computer, then "
         "send the same request again.",
     ),
@@ -345,14 +348,16 @@ REASONS: dict[str, Reason] = {
         "no",
         "retry",
         "The run was canceled before it changed anything. Nothing was written.",
-        "If the work is still needed, send the same request again with the same request_id.",
+        "If the work is still needed, send the same request again with the "
+        "same request_id.",
     ),
     "platform_error": Reason(
         "did_not_run",
         True,
         "no",
         "retry",
-        "OpenAdapt hit a problem on this computer before it changed anything. Nothing was written.",
+        "OpenAdapt hit a problem on this computer before it changed anything. "
+        "Nothing was written.",
         "Try again with the same request_id. If it keeps happening, tell the operator.",
     ),
     "app_unreachable": Reason(
@@ -360,7 +365,8 @@ REASONS: dict[str, Reason] = {
         True,
         "no",
         "retry",
-        "Didn't start because the app isn't reachable from this computer. Nothing was written.",
+        "Didn't start because the app isn't reachable from this computer. "
+        "Nothing was written.",
         "Try again with the same request_id once the app is back. If it keeps "
         "happening, tell the operator.",
     ),
@@ -391,8 +397,10 @@ REASONS: dict[str, Reason] = {
         False,
         "no",
         "fix_setup",
-        "Didn't start because this request_id was already tried too many times. Nothing new ran.",
-        "Ask the operator to look at the earlier runs for this request before trying again.",
+        "Didn't start because this request_id was already tried too many "
+        "times. Nothing new ran.",
+        "Ask the operator to look at the earlier runs for this request before "
+        "trying again.",
     ),
     # -- not terminal --------------------------------------------------------
     "running": Reason(
@@ -401,7 +409,8 @@ REASONS: dict[str, Reason] = {
         "unknown",
         "call_get_run",
         "Still running.",
-        "Call get_run with this run_id to get the result. Don't start the same work again.",
+        "Call get_run with this run_id to get the result. Don't start the "
+        "same work again.",
     ),
 }
 
@@ -519,7 +528,9 @@ def report_consistency(report: object) -> tuple[bool, Optional[str], Optional[st
     eligible = report.get("production_eligible")
     if eligible is not None and not isinstance(eligible, bool):
         return False, execution, transaction
-    if eligible is True and (execution != "VERIFIED" or profile not in {"standard", "regulated"}):
+    if eligible is True and (
+        execution != "VERIFIED" or profile not in {"standard", "regulated"}
+    ):
         return False, execution, transaction
     envelope = report.get("outcome_envelope")
     if envelope is not None:
@@ -788,7 +799,8 @@ RUN_RESULT_SCHEMA: dict[str, Any] = {
         "safe_to_retry": {
             "type": "boolean",
             "description": (
-                "True only when nothing was written. Reuse the same request_id when you retry."
+                "True only when nothing was written. Reuse the same request_id "
+                "when you retry."
             ),
         },
         "what_happened": {"type": "string"},

@@ -50,7 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "serve",
         help=(
-            "Serve workflows to your AI agent over MCP (stdio). With no flags, serve the sandbox."
+            "Serve workflows to your AI agent over MCP (stdio). With no flags, "
+            "serve the sandbox."
         ),
     )
     p.add_argument(
@@ -423,7 +424,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 2
     if args.authoring and args.allow_run and not args.bundles:
         print(
-            "serve: --authoring does not imply --allow-run; --allow-run still requires --bundles",
+            "serve: --authoring does not imply --allow-run; --allow-run still "
+            "requires --bundles",
             file=sys.stderr,
         )
         return 2
@@ -536,7 +538,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
             runs_dir = Path(args.runs_dir).expanduser() if args.runs_dir else default_sandbox_dir()
             runs_dir.mkdir(parents=True, exist_ok=True)
-            sandbox_engine = SandboxEngine(runs_dir, engine=args.sandbox_engine, headed=args.headed)
+            sandbox_engine = SandboxEngine(
+                runs_dir, engine=args.sandbox_engine, headed=args.headed
+            )
             bridge = AgentBridge(
                 None,
                 RunnerConfig(runs_dir=runs_dir, timeout_s=args.timeout),

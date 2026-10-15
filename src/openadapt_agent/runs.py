@@ -221,9 +221,13 @@ class RunStore:
             "host": socket.gethostname(),
         }
 
-    def _orphan(self, run_id: str, request_id: str, workflow: str, mode: str) -> dict[str, Any]:
+    def _orphan(
+        self, run_id: str, request_id: str, workflow: str, mode: str
+    ) -> dict[str, Any]:
         """A running record with no owner process: get_run marks it interrupted."""
-        record = self.new_record(request_id=request_id, workflow=workflow, mode=mode, run_id=run_id)
+        record = self.new_record(
+            request_id=request_id, workflow=workflow, mode=mode, run_id=run_id
+        )
         record["pid"] = None
         self.write(record)
         return record
@@ -261,7 +265,9 @@ class RunStore:
 
     # -- requests ----------------------------------------------------------
 
-    def begin(self, *, request_id: str, workflow: str, inputs: Any, mode: str) -> Begin:
+    def begin(
+        self, *, request_id: str, workflow: str, inputs: Any, mode: str
+    ) -> Begin:
         """Decide whether this request starts a new attempt or replays one."""
         fingerprint = self.fingerprint(workflow, inputs)
         request_hash = self._request_hash(request_id)

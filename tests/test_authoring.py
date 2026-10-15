@@ -412,7 +412,9 @@ def test_unknown_fields_and_missing_click_target_are_refused():
         bridge.dispatch("click", {})
 
 
-def test_mcp_lists_authoring_probe_tools_without_run_tools(bundles_root, runner_config, mcp_client):
+def test_mcp_lists_authoring_probe_tools_without_run_tools(
+    bundles_root, runner_config, mcp_client
+):
     from openadapt_agent.bridge import AgentBridge
 
     authoring = AuthoringBridge(FakeAuthoringSession())
@@ -543,7 +545,9 @@ def test_invalid_backend_is_coach_only_not_unknown():
 
 
 def test_observe_wire_truncates_to_32kib(monkeypatch):
-    monkeypatch.setattr("openadapt_agent.authoring.MAX_AUTHORING_WIRE_BYTES", 800)
+    monkeypatch.setattr(
+        "openadapt_agent.authoring.MAX_AUTHORING_WIRE_BYTES", 800
+    )
     tree = []
     for index in range(40):
         tree.append(
@@ -695,7 +699,9 @@ def test_login_pause_records_observed_and_compile_needs_human_admit():
     assert session.typed_via_backend == []
     continued = bridge.dispatch("continue_input", {})
     assert continued == {"recorded": True, "param": "password"}
-    assert session.observed_events == [{"kind": "type", "param": "password", "secret": True}]
+    assert session.observed_events == [
+        {"kind": "type", "param": "password", "secret": True}
+    ]
     compiled = bridge.dispatch("compile", {})
     assert compiled["status"] == "needs_human_admit"
     assert "VERIFIED" not in json.dumps(compiled)
@@ -719,7 +725,9 @@ def test_headed_url_pins_playwright_not_cdp(monkeypatch):
         return object(), "web", lambda: None
 
     monkeypatch.setattr("openadapt_agent.authoring._pin_web", fake_pin_web)
-    backend, kind, close = pin_local_backend(url="https://example.invalid/app", headed=True)
+    backend, kind, close = pin_local_backend(
+        url="https://example.invalid/app", headed=True
+    )
     assert kind == "web"
     assert launched == {"url": "https://example.invalid/app", "headed": True}
     assert callable(close)
@@ -758,7 +766,10 @@ def test_desktop_ipc_discovery_does_not_open_a_listener(tmp_path, monkeypatch):
     assert found is not None
     assert found["endpoint"]["host"] == "127.0.0.1"
     source = (
-        Path(__file__).resolve().parents[1] / "src" / "openadapt_agent" / "authoring.py"
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "openadapt_agent"
+        / "authoring.py"
     ).read_text(encoding="utf-8")
     assert "http.client" not in source
     assert "urlopen" not in source
@@ -825,7 +836,9 @@ def test_open_authoring_session_windows_never_constructs_flow_session(monkeypatc
     fake_authoring.AuthoringSession = Session
     monkeypatch.setitem(sys.modules, "openadapt_flow", fake_flow)
     monkeypatch.setitem(sys.modules, "openadapt_flow.authoring", fake_authoring)
-    session = open_authoring_session(out_dir=tmp_path, backend=object(), backend_kind="windows")
+    session = open_authoring_session(
+        out_dir=tmp_path, backend=object(), backend_kind="windows"
+    )
     assert isinstance(session, CoachOnlySession)
     assert session.backend_kind == "windows"
 
@@ -848,7 +861,9 @@ def test_open_authoring_session_maps_f1_coach_only_error(monkeypatch, tmp_path):
     fake_authoring.AuthoringSession = Session
     monkeypatch.setitem(sys.modules, "openadapt_flow", fake_flow)
     monkeypatch.setitem(sys.modules, "openadapt_flow.authoring", fake_authoring)
-    session = open_authoring_session(out_dir=tmp_path, backend=object(), backend_kind="web")
+    session = open_authoring_session(
+        out_dir=tmp_path, backend=object(), backend_kind="web"
+    )
     assert isinstance(session, CoachOnlySession)
 
 
@@ -925,7 +940,9 @@ def install_fake_playwright_flow(monkeypatch) -> dict:
     monkeypatch.setitem(sys.modules, "openadapt_flow", fake_flow)
     monkeypatch.setitem(sys.modules, "openadapt_flow.authoring", fake_authoring)
     monkeypatch.setitem(sys.modules, "openadapt_flow.backends", fake_backends)
-    monkeypatch.setitem(sys.modules, "openadapt_flow.backends.playwright_backend", fake_playwright)
+    monkeypatch.setitem(
+        sys.modules, "openadapt_flow.backends.playwright_backend", fake_playwright
+    )
     return launched
 
 
@@ -948,13 +965,16 @@ def test_url_session_keeps_playwright_on_one_owner_thread_under_anyio(
 ):
     launched = install_fake_playwright_flow(monkeypatch)
     try:
-        session = open_authoring_session(out_dir=tmp_path, url="http://127.0.0.1:9/", headed=True)
+        session = open_authoring_session(
+            out_dir=tmp_path, url="http://127.0.0.1:9/", headed=True
+        )
         server = build_server(authoring=AuthoringBridge(session, out_dir=tmp_path))
 
         async def drive():
             async with mcp_client(server) as client:
                 return [
-                    await client.call_tool(name, {}) for name in ("observe", "start_record", "halt")
+                    await client.call_tool(name, {})
+                    for name in ("observe", "start_record", "halt")
                 ]
 
         # anyio refuses to start on a thread where Playwright left its loop.
@@ -1028,7 +1048,9 @@ def test_url_session_refusal_stops_the_owner_thread(monkeypatch, tmp_path):
     assert {thread.name for thread in threading.enumerate()} <= before
 
 
-def test_url_coach_only_fallback_still_refuses_type_behind_owner_thread(monkeypatch, tmp_path):
+def test_url_coach_only_fallback_still_refuses_type_behind_owner_thread(
+    monkeypatch, tmp_path
+):
     """Windows --url that cannot pin a browser stays coach-only, not "recorded"."""
 
     install_fake_playwright_flow(monkeypatch)

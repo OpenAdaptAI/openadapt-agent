@@ -19,7 +19,9 @@ def test_deployment_yaml_is_synthetic_and_fail_closed() -> None:
     assert "phi" not in text.lower()
 
 
-def test_prepare_tutorial_session_records_then_keeps_mockmed(monkeypatch, tmp_path: Path) -> None:
+def test_prepare_tutorial_session_records_then_keeps_mockmed(
+    monkeypatch, tmp_path: Path
+) -> None:
     stopped = {"n": 0}
 
     def fake_serve(port: int = 0, *, host: str = "127.0.0.1"):

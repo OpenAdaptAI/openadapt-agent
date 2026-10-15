@@ -171,9 +171,7 @@ def test_refusal_before_start_did_not_run_with_closed_checks():
 
 
 def test_pregate_refusal_text_maps_to_one_check():
-    text = (
-        "run REFUSED: Standard and Regulated actuation requires a signed qualification admission."
-    )
+    text = "run REFUSED: Standard and Regulated actuation requires a signed qualification admission."
     assert parse_failed_checks(text) == ["no_readiness_test"]
     assert parse_failed_checks("something new") == ["other"]
 
@@ -248,6 +246,8 @@ def test_ledger_outcome_keeps_uncertain_results_uncertain():
 
 
 def test_unknown_reason_falls_back_to_uncertain():
-    result = build_result("made_up", workflow=None, run_id=None, request_id=None, mode="production")
+    result = build_result(
+        "made_up", workflow=None, run_id=None, request_id=None, mode="production"
+    )
     assert result["reason"] == "result_unreadable"
     assert result["outcome"] == "not_sure_if_saved"

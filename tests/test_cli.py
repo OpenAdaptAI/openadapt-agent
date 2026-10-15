@@ -71,7 +71,9 @@ def test_synthetic_recorded_defaults_require_run_authority(tmp_path, capsys):
 
 
 def test_tutorial_flag_does_not_require_bundles(tmp_path):
-    args = build_parser().parse_args(["serve", "--tutorial", "--runs-dir", str(tmp_path / "runs")])
+    args = build_parser().parse_args(
+        ["serve", "--tutorial", "--runs-dir", str(tmp_path / "runs")]
+    )
     assert args.tutorial is True
     assert args.bundles is None
     assert args.allow_run is False
@@ -144,17 +146,11 @@ def test_mode_production_enables_runs_and_attended_adds_decisions(
     monkeypatch.setattr("openadapt_agent.flow_service.open_attended_service", fake_attended)
     captured = _capture_serve(monkeypatch)
     runs = str(tmp_path / "runs")
-    assert (
-        main(["serve", "--mode", "production", "--bundles", str(bundles_root), "--runs-dir", runs])
-        == 0
-    )
+    assert main(["serve", "--mode", "production", "--bundles", str(bundles_root), "--runs-dir", runs]) == 0
     assert captured["bridge"].mode == "production"
     assert "run_workflow" in captured["tools"]
     assert "reject_attention" not in captured["tools"]
-    assert (
-        main(["serve", "--mode", "attended", "--bundles", str(bundles_root), "--runs-dir", runs])
-        == 0
-    )
+    assert main(["serve", "--mode", "attended", "--bundles", str(bundles_root), "--runs-dir", runs]) == 0
     assert captured["bridge"].mode == "attended"
     assert "reject_attention" in captured["tools"]
     assert main(["serve", "--bundles", str(bundles_root), "--runs-dir", runs]) == 0
@@ -169,7 +165,9 @@ def test_mode_production_enables_runs_and_attended_adds_decisions(
 
 
 def test_authoring_flag_does_not_require_bundles_or_imply_allow_run(tmp_path):
-    args = build_parser().parse_args(["serve", "--authoring", "--runs-dir", str(tmp_path / "runs")])
+    args = build_parser().parse_args(
+        ["serve", "--authoring", "--runs-dir", str(tmp_path / "runs")]
+    )
     assert args.authoring is True
     assert args.bundles is None
     assert args.allow_run is False
@@ -299,7 +297,9 @@ def test_authoring_serve_registers_probe_tools_without_run(monkeypatch, capsys):
 
 
 def test_tutorial_rejects_private_bundle_path(tmp_path, capsys):
-    result = main(["serve", "--tutorial", "--bundles", str(tmp_path / "bundles")])
+    result = main(
+        ["serve", "--tutorial", "--bundles", str(tmp_path / "bundles")]
+    )
     assert result == 2
     assert "cannot be combined" in capsys.readouterr().err
 

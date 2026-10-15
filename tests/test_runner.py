@@ -390,7 +390,9 @@ def test_refusal_carries_closed_failed_checks_not_flow_text():
     assert "Jane Roe" not in str(public)
 
 
-def test_launch_failure_is_a_platform_error_that_may_retry(monkeypatch, runner_config, bundle_dir):
+def test_launch_failure_is_a_platform_error_that_may_retry(
+    monkeypatch, runner_config, bundle_dir
+):
     def raise_missing(cmd, capture_output=True, text=True, timeout=None, **kwargs):
         raise FileNotFoundError(cmd[0])
 
