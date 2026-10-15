@@ -167,11 +167,13 @@ def _server_instructions(
             "waiting_for_approval means a person must approve the next save "
             "first); "
             "not_sure_if_saved means a person must check the record, so never "
-            "retry it; did_not_run means nothing was written, so fix the problem "
-            "and retry only when safe_to_retry is true. Reuse the same request_id "
-            "when you retry: the same id never writes twice. If the outcome is "
-            "running, call get_run with the run_id. Tell the user what_happened "
-            "in your own words and never call anything but done a success."
+            "retry it; did_not_run means this call wrote nothing, so fix the "
+            "problem and retry only when safe_to_retry is true, and after "
+            "request_id_conflict an earlier request with the same request_id may "
+            "have saved. Reuse the same request_id when you retry: the same id "
+            "never writes twice. If the outcome is running, call get_run with "
+            "the run_id. Tell the user what_happened in your own words and "
+            "never call anything but done a success."
         )
         if bridge.mode == "sandbox":
             text += (

@@ -471,6 +471,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             return 0
 
         if mode == "sandbox":
+            from openadapt_agent.copy import TUTORIAL_SERVE_COMMAND
             from openadapt_agent.sandbox import SandboxEngine, default_sandbox_dir
 
             runs_dir = Path(args.runs_dir).expanduser() if args.runs_dir else default_sandbox_dir()
@@ -488,7 +489,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             if sandbox_engine.unavailable_reason == "browser_extra_missing":
                 note = (
                     " To drive the synthetic app in a hidden browser instead, "
-                    "install the tutorial extra."
+                    f"install the tutorial extra: {TUTORIAL_SERVE_COMMAND}"
                 )
             print(
                 f"openadapt-agent {__version__}: sandbox mode. One workflow "
