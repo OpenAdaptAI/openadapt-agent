@@ -531,11 +531,6 @@ class RepairDesk:
     def teach(self, token: Any, demonstration: Any) -> dict[str, Any]:
         sha, record = self._load(token)
         setting = self._require_open(sha, record)
-        agent_teach = _flow_agent_teach()
-        if agent_teach is None:
-            raise RepairError("the installed openadapt-flow can't take agent repairs")
-        if self.demonstrator is None:
-            raise RepairError("no screen is configured for repairs on this server")
         approval = None
         if setting.mode == "ask_each_time":
             approval = self._approval(sha)
@@ -544,6 +539,11 @@ class RepairDesk:
                     "a person must approve this repair first: "
                     f"`openadapt-agent repair approve-screen {token_id(sha)}`"
                 )
+        agent_teach = _flow_agent_teach()
+        if agent_teach is None:
+            raise RepairError("the installed openadapt-flow can't take agent repairs")
+        if self.demonstrator is None:
+            raise RepairError("no screen is configured for repairs on this server")
         if not isinstance(demonstration, dict) or demonstration.get("action") != "click":
             raise RepairError("demonstration must be {action: click, x, y}")
         x, y = demonstration.get("x"), demonstration.get("y")
