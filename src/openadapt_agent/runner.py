@@ -188,9 +188,16 @@ _HELD: list[subprocess.Popen] = []
 
 
 def _stop_held() -> None:
+    """End every held run. Flow treats SIGTERM as a release, cleans up its
+    hold, and closes the browser; give it a moment before killing."""
     for proc in _HELD:
         if proc.poll() is None:
             proc.terminate()
+    for proc in _HELD:
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 atexit.register(_stop_held)
