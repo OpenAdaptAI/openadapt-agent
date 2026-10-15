@@ -230,7 +230,12 @@ def test_continued_pause_never_turns_into_a_retryable_result(
     paused = run(bridge)
     assert paused["outcome"] == "needs_review"
 
-    pause["item"] = {"id": "a1", "status": "halted", "durably_paused": False, "category": "identity"}
+    pause["item"] = {
+        "id": "a1",
+        "status": "halted",
+        "durably_paused": False,
+        "category": "identity",
+    }
     during = bridge.dispatch("get_run", {"run_id": paused["run_id"]})
     assert during["outcome"] == "needs_review"
     assert during["safe_to_retry"] is False

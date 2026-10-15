@@ -51,10 +51,19 @@ def test_typed_password_step_never_reaches_the_skill(tmp_path):
         name="Login and note",
         params={"note": "Recorded note"},
         steps=[
-            Step(id="s1", intent="type 'mockmed-demo-pass'", action=ActionKind.TYPE,
-                 text="mockmed-demo-pass"),
-            Step(id="s2", intent="type the note", action=ActionKind.TYPE,
-                 text="Recorded note", param="note"),
+            Step(
+                id="s1",
+                intent="type 'mockmed-demo-pass'",
+                action=ActionKind.TYPE,
+                text="mockmed-demo-pass",
+            ),
+            Step(
+                id="s2",
+                intent="type the note",
+                action=ActionKind.TYPE,
+                text="Recorded note",
+                param="note",
+            ),
         ],
     ).save(bundle)
     text = (emit_agent_skill(bundle, tmp_path / "skills") / "SKILL.md").read_text()

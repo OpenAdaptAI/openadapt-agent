@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import re
+import atexit
 import subprocess
 import sys
 import tempfile
@@ -91,6 +92,8 @@ _STATUS_FALLBACK_REASONS = {
     "timeout": "timed_out",
     "error": "result_unreadable",
 }
+
+
 def legacy_reason(
     status: str,
     execution_outcome: Optional[str] = None,
@@ -177,6 +180,65 @@ class RunnerConfig:
     #: start. None passes nothing, so Flow's default applies (a person
     #: approves each save under the Standard and Regulated profiles).
     approval_mode: Optional[str] = None
+    #: Seconds Flow keeps a halted browser page open for ``teach_repair``
+    #: (``openadapt-flow run --hold-on-halt``). 0 closes it at once.
+    hold_on_halt_s: float = 0.0
+
+
+HOLD_FILE = "repair-hold.json"
+_HELD: list[subprocess.Popen] = []
+
+
+def _stop_held() -> None:
+    for proc in _HELD:
+        if proc.poll() is None:
+            proc.terminate()
+
+
+atexit.register(_stop_held)
+
+
+@dataclass
+class _Finished:
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _run_holding(cmd: list[str], run_dir: Path, timeout_s: float) -> _Finished:
+    """Run Flow, returning early if it halts and holds its page for repair.
+
+    Output goes to files, not pipes, so a held child never blocks on a full
+    pipe. A held child keeps running until released or its own hold timeout.
+    """
+    out = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
+    err = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
+    proc = subprocess.Popen(cmd, stdout=out, stderr=err, text=True)
+    deadline = time.monotonic() + timeout_s
+    hold_file = run_dir / HOLD_FILE
+    held_code: Optional[int] = None
+    while proc.poll() is None:
+        if hold_file.is_file():
+            try:
+                held = json.loads(hold_file.read_text())
+                code = held.get("exit_code")
+                held_code = code if isinstance(code, int) else 1
+            except (OSError, json.JSONDecodeError):
+                held_code = None  # still being written
+            if held_code is not None:
+                _HELD.append(proc)
+                break
+        if time.monotonic() > deadline:
+            proc.kill()
+            proc.wait()
+            out.seek(0)
+            err.seek(0)
+            raise subprocess.TimeoutExpired(cmd, timeout_s, out.read(), err.read())
+        time.sleep(0.1)
+    out.seek(0)
+    err.seek(0)
+    code = held_code if held_code is not None else proc.returncode
+    return _Finished(code, out.read(), err.read())
 
 
 @dataclass
@@ -605,6 +667,8 @@ class FlowRunner:
             # Flow fetches Cloud's signed receipt after a VERIFIED outcome and
             # writes it into report.json (needs OPENADAPT_EXECUTE_API_KEY).
             cmd += ["--cloud-execution-id", cloud_execution_id]
+        if self.config.hold_on_halt_s > 0:
+            cmd += ["--hold-on-halt", f"{self.config.hold_on_halt_s:g}"]
         cmd += list(self.config.extra_run_args)
         return cmd
 
@@ -661,15 +725,18 @@ class FlowRunner:
             try:
                 # Decode with replacement: a strict decode error would surface
                 # after Flow already ran and read as a launch failure.
-                proc = _run_flow_process(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=self.config.timeout_s,
-                    awaiting_person=lambda: waiting_for_person(run_dir),
-                )
+                if self.config.hold_on_halt_s > 0:
+                    proc = _run_holding(cmd, run_dir, self.config.timeout_s)
+                else:
+                    proc = _run_flow_process(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=self.config.timeout_s,
+                        awaiting_person=lambda: waiting_for_person(run_dir),
+                    )
             except subprocess.TimeoutExpired as exc:
                 return RunOutcome(
                     status="timeout",

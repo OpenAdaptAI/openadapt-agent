@@ -53,10 +53,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
+from openadapt_agent.runner import HOLD_FILE
+
 __all__ = [
     "SCREEN_MODES",
     "AccessSetting",
     "Demonstrator",
+    "HeldRunDemonstrator",
     "LazyBackendDemonstrator",
     "RepairAccessPolicy",
     "RepairDesk",
@@ -239,8 +242,64 @@ class LazyBackendDemonstrator:
         self._get().click(x, y)
 
     def viewport(self) -> tuple[int, int]:
-        width, height = self._get().viewport()
+        viewport = self._get().viewport
+        width, height = viewport() if callable(viewport) else viewport
         return int(width), int(height)
+
+
+class HeldRunDemonstrator:
+    """The halted run's own page, which Flow held open (``--hold-on-halt``).
+
+    Talks to the private socket named in ``<run_dir>/repair-hold.json``.
+    """
+
+    def __init__(self, hold: dict[str, Any]) -> None:
+        self.hold = hold
+
+    @classmethod
+    def for_run(cls, run_dir: Path | str) -> Optional["HeldRunDemonstrator"]:
+        hold = _read_json(Path(run_dir) / HOLD_FILE)
+        if not hold or not isinstance(hold.get("socket"), str) or not hold.get("secret"):
+            return None
+        return cls(hold)
+
+    def _call(self, payload: dict[str, Any]) -> dict[str, Any]:
+        import socket
+
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(30)
+                client.connect(self.hold["socket"])
+                message = {**payload, "secret": self.hold["secret"]}
+                client.sendall(json.dumps(message).encode() + b"\n")
+                data = b""
+                while not data.endswith(b"\n"):
+                    chunk = client.recv(1 << 20)
+                    if not chunk:
+                        break
+                    data += chunk
+            reply = json.loads(data.decode())
+        except (OSError, ValueError) as exc:
+            raise RepairError("the halted run's screen is no longer open") from exc
+        if not isinstance(reply, dict) or not reply.get("ok"):
+            raise RepairError("the halted run's screen refused the request")
+        return reply
+
+    def screenshot(self) -> bytes:
+        return base64.b64decode(self._call({"op": "screenshot"})["png_base64"])
+
+    def click(self, x: int, y: int) -> None:
+        self._call({"op": "click", "x": x, "y": y})
+
+    def viewport(self) -> tuple[int, int]:
+        width, height = self._call({"op": "viewport"})["viewport"]
+        return int(width), int(height)
+
+    def release(self) -> None:
+        try:
+            self._call({"op": "release"})
+        except RepairError:
+            pass  # already gone; Flow's own timeout cleans up
 
 
 def default_scrubber() -> Any:
@@ -319,6 +378,11 @@ class RepairDesk:
     def _preview_path(self, sha: str) -> Path:
         return self.root / "approvals" / f"{sha}.png"
 
+    def _screen_for(self, record: dict[str, Any]) -> Optional[Demonstrator]:
+        """Prefer the halted run's held page; else the configured screen."""
+        held = HeldRunDemonstrator.for_run(record.get("run_dir") or "")
+        return held if held is not None else self.demonstrator
+
     def store_for(self, workflow: str) -> Path:
         return self.repair_store_root / _sha(workflow)[:16]
 
@@ -388,7 +452,9 @@ class RepairDesk:
     def needs_repair(self, token: str) -> dict[str, Any]:
         sha, record = self._load(token)
         setting = self.policy.for_workflow(record["workflow"])
-        enabled = setting.mode != "off" and teach_supported() and self.demonstrator is not None
+        enabled = (
+            setting.mode != "off" and teach_supported() and self._screen_for(record) is not None
+        )
         approval_needed = (
             enabled and setting.mode == "ask_each_time" and self._approval(sha) is None
         )
@@ -435,9 +501,10 @@ class RepairDesk:
     def prepare_preview(self, sha: str, record: dict[str, Any]) -> tuple[bytes, Optional[dict]]:
         """Capture and scrub the screen a person is asked to approve."""
         setting = self._require_open(sha, record)
-        if self.demonstrator is None:
+        screen = self._screen_for(record)
+        if screen is None:
             raise RepairError("no screen is configured for repairs on this server")
-        raw = self.demonstrator.screenshot()
+        raw = screen.screenshot()
         if setting.mode == "allow_unscrubbed":
             return raw, None
         try:
@@ -503,11 +570,10 @@ class RepairDesk:
         }
 
     # teaching
-    def _record_click(self, directory: Path, x: int, y: int) -> None:
-        assert self.demonstrator is not None
-        before = self.demonstrator.screenshot()
-        self.demonstrator.click(x, y)
-        after = self.demonstrator.screenshot()
+    def _record_click(self, screen: Demonstrator, directory: Path, x: int, y: int) -> None:
+        before = screen.screenshot()
+        screen.click(x, y)
+        after = screen.screenshot()
         frames = directory / "frames"
         frames.mkdir(parents=True)
         (frames / "0000_before.png").write_bytes(before)
@@ -515,7 +581,7 @@ class RepairDesk:
         (directory / "events.jsonl").write_text(
             json.dumps({"i": 0, "kind": "click", "x": x, "y": y, "t": 1.0}) + "\n"
         )
-        width, height = self.demonstrator.viewport()
+        width, height = screen.viewport()
         (directory / "meta.json").write_text(
             json.dumps(
                 {
@@ -542,12 +608,29 @@ class RepairDesk:
         agent_teach = _flow_agent_teach()
         if agent_teach is None:
             raise RepairError("the installed openadapt-flow can't take agent repairs")
-        if self.demonstrator is None:
+        screen = self._screen_for(record)
+        if screen is None:
             raise RepairError("no screen is configured for repairs on this server")
+        try:
+            return self._teach(sha, record, setting, approval, agent_teach, screen, demonstration)
+        finally:
+            if isinstance(screen, HeldRunDemonstrator):
+                screen.release()
+
+    def _teach(
+        self,
+        sha: str,
+        record: dict[str, Any],
+        setting: Any,
+        approval: Optional[dict[str, Any]],
+        agent_teach: Any,
+        screen: Demonstrator,
+        demonstration: Any,
+    ) -> dict[str, Any]:
         if not isinstance(demonstration, dict) or demonstration.get("action") != "click":
             raise RepairError("demonstration must be {action: click, x, y}")
         x, y = demonstration.get("x"), demonstration.get("y")
-        width, height = self.demonstrator.viewport()
+        width, height = screen.viewport()
         if not all(isinstance(v, int) and not isinstance(v, bool) for v in (x, y)):
             raise RepairError("x and y must be whole pixel coordinates")
         if not (0 <= x < width and 0 <= y < height):
@@ -563,7 +646,7 @@ class RepairDesk:
         if work.exists():
             shutil.rmtree(work)
         recording = work / "recording"
-        self._record_click(recording, x, y)
+        self._record_click(screen, recording, x, y)
         evidence = record.get("scrub_evidence")
         provenance = RepairProvenance(
             agent_id=self.agent_id,

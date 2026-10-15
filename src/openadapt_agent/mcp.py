@@ -260,8 +260,7 @@ def build_server(
                 validate(arguments or {}, spec.input_schema)
             except ValidationError:
                 raise BridgeError(
-                    getattr(spec, "usage", None)
-                    or "tool arguments do not match the input schema"
+                    getattr(spec, "usage", None) or "tool arguments do not match the input schema"
                 ) from None
             human_confirmed = False
             if name in ATTENDED_TOOLS:
@@ -390,9 +389,7 @@ async def _run_stdio(
     with _protected_stdout() as wire:
         kwargs = {"stdout": wire} if wire is not None else {}
         async with stdio_server(**kwargs) as (read_stream, write_stream):
-            await server.run(
-                read_stream, write_stream, server.create_initialization_options()
-            )
+            await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 def serve(

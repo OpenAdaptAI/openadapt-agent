@@ -89,9 +89,12 @@ def render_skill(
     """
     schema = inputs_schema(card)
     required = set(schema["required"])
-    inputs = "\n".join(
-        _input_line(name, prop, name in required) for name, prop in schema["properties"].items()
-    ) or "- This workflow takes no inputs. Send an empty object."
+    inputs = (
+        "\n".join(
+            _input_line(name, prop, name in required) for name, prop in schema["properties"].items()
+        )
+        or "- This workflow takes no inputs. Send an empty object."
+    )
     example_inputs = {name: f"<{name}>" for name in sorted(required)}
     call = json.dumps(
         {

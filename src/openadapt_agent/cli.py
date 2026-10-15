@@ -50,8 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "serve",
         help=(
-            "Serve workflows to your AI agent over MCP (stdio). With no flags, "
-            "serve the sandbox."
+            "Serve workflows to your AI agent over MCP (stdio). With no flags, serve the sandbox."
         ),
     )
     p.add_argument(
@@ -256,6 +255,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help="Where repair tokens, approvals, and candidates live (default RUNS_DIR/.repair).",
     )
+    p.add_argument(
+        "--hold-on-halt",
+        type=float,
+        default=300.0,
+        metavar="SECONDS",
+        help=(
+            "With --repair-access, keep a halted browser run's page open this "
+            "long so teach_repair acts on it (default 300; 0 turns it off)."
+        ),
+    )
     p.set_defaults(func=_cmd_serve)
 
     repair = sub.add_parser(
@@ -414,8 +423,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 2
     if args.authoring and args.allow_run and not args.bundles:
         print(
-            "serve: --authoring does not imply --allow-run; --allow-run still "
-            "requires --bundles",
+            "serve: --authoring does not imply --allow-run; --allow-run still requires --bundles",
             file=sys.stderr,
         )
         return 2
@@ -528,9 +536,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
             runs_dir = Path(args.runs_dir).expanduser() if args.runs_dir else default_sandbox_dir()
             runs_dir.mkdir(parents=True, exist_ok=True)
-            sandbox_engine = SandboxEngine(
-                runs_dir, engine=args.sandbox_engine, headed=args.headed
-            )
+            sandbox_engine = SandboxEngine(runs_dir, engine=args.sandbox_engine, headed=args.headed)
             bridge = AgentBridge(
                 None,
                 RunnerConfig(runs_dir=runs_dir, timeout_s=args.timeout),
@@ -569,6 +575,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             allow_url_override=args.allow_url_override,
             extra_run_args=tuple(extra_run_args),
             approval_mode=args.approval_mode,
+            hold_on_halt_s=(
+                max(0.0, min(args.hold_on_halt, 1800.0)) if args.repair_access else 0.0
+            ),
         )
         with open_attended_service(
             enabled=args.allow_attended_actions,

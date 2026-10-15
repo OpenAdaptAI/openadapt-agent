@@ -145,8 +145,7 @@ _RUN_WORKFLOW_USAGE = (
     "wait_seconds is optional, 0 to 600. Nothing ran."
 )
 _GET_RUN_USAGE = (
-    "get_run needs run_id (the run_id from run_workflow). wait_seconds is "
-    "optional, 0 to 600."
+    "get_run needs run_id (the run_id from run_workflow). wait_seconds is optional, 0 to 600."
 )
 
 

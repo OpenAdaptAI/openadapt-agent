@@ -69,9 +69,9 @@ def test_mockmed_optimistic_fault_leaves_the_store_unchanged() -> None:
 
         request = Request(
             url + "api/encounter?fault=optimistic",
-            data=json.dumps(
-                {"patient_id": "p1", "type": "Triage", "note": "synthetic"}
-            ).encode("utf-8"),
+            data=json.dumps({"patient_id": "p1", "type": "Triage", "note": "synthetic"}).encode(
+                "utf-8"
+            ),
             method="POST",
             headers={"Content-Type": "application/json"},
         )
