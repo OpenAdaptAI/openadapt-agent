@@ -129,3 +129,16 @@ def test_cli_wires_seal_commands():
     parser = build_parser()
     assert parser.parse_args(["seal", "verify", "x.json"]).func is cmd_verify
     assert parser.parse_args(["seal", "keys", "pin", "--confirm", "seal-ed25519-0"]).confirm == ["seal-ed25519-0"]
+
+
+def test_seal_signed_by_cloud_typescript_signer_verifies():
+    """Fixture produced by Cloud's src/lib/sealSignature.ts signSeal (throwaway key)."""
+    from pathlib import Path
+
+    from openadapt_agent.seal import parse_registry, verify_document
+
+    fixture = json.loads((Path(__file__).parent / "fixtures" / "cloud-ts-signed-seal.json").read_text())
+    registry = parse_registry({"keys": fixture["keys"]})
+    assert verify_document(fixture["receipt"], registry)["reason"] == "verified"
+    changed = dict(fixture["receipt"], note="changed")
+    assert verify_document(changed, registry)["reason"] == "receipt_mismatch"
