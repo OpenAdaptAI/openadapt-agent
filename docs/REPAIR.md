@@ -82,3 +82,14 @@ how many screens the agent saw, whether they were scrubbed and by what, and
 who approved sharing. Flow refuses review or approval from the agent's id.
 
 Once the candidate reaches canary, `run_workflow` uses the repaired bundle.
+
+## The screen the agent sees
+
+With `--repair-access`, `serve` runs Flow with `--hold-on-halt` (300 seconds by
+default; change it with `--hold-on-halt SECONDS`, or 0 to turn it off). A
+halted browser run then keeps its page open, and the server returns
+`needs_repair` as soon as Flow reports the halt. `get_repair_screen` and
+`teach_repair` act on that page through a private socket that only this server
+knows the secret for. After `teach_repair`, or when the hold times out, Flow
+closes the browser. If no held page is available, the server falls back to its
+configured local screen.
