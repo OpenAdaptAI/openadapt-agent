@@ -209,6 +209,19 @@ class RunOutcome:
     #: The approval mode the run used (Flow's report), else the operator's.
     approval_mode: Optional[str] = None
 
+    def seal_verified(self) -> bool:
+        """True only when a Cloud Seal on this run verifies (openadapt_agent.seal)."""
+        from openadapt_agent.seal import run_is_sealed
+
+        if self.status != "success":
+            return False
+        try:
+            return run_is_sealed(
+                self.report, run_id=self.run_id, execution_outcome=self.execution_outcome
+            )
+        except Exception:
+            return False
+
     def contract_reason(self) -> str:
         """The contract reason for this outcome, falling back to the status."""
         if self.reason in REASONS:
@@ -245,6 +258,7 @@ class RunOutcome:
             run_id=self.run_id,
             request_id=request_id,
             mode=mode,
+            proof="sealed" if self.seal_verified() else None,
             execution_outcome=self.execution_outcome,
             transaction_outcome=self.transaction_outcome,
             failed_checks=self.failed_checks,
@@ -270,7 +284,7 @@ class RunOutcome:
             "schema_version": 1,
             "status": self.status,
             "success": self.status == "success",
-            "sealed": False,
+            "sealed": self.seal_verified(),
             # Kept for older callers. A verified local run is reported as done
             # with ``proof: "local"``; it is never turned into a failure.
             "requires_seal": False,
