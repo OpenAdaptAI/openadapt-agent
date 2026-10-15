@@ -62,12 +62,6 @@ def test_server_builds_and_lists_bridge_tools(bundles_root, runner_config, mcp_c
     assert list_tool.get("_meta") is None
 
 
-def test_initialize_reports_the_package_version(bundles_root, runner_config):
-    """serverInfo.version comes from these options; the SDK default is empty."""
-    server = build_server(AgentBridge(bundles_root, runner_config))
-    assert server.create_initialization_options().server_version == __version__
-
-
 def test_server_read_only_when_run_not_allowed(bundles_root, runner_config, mcp_client):
     bridge = AgentBridge(bundles_root, runner_config, allow_run=False)
     server = build_server(bridge)

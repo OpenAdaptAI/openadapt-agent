@@ -941,6 +941,27 @@ def _default_authoring_dir() -> Path:
     return default_runs_dir() / "authoring"
 
 
+def _takes_positional(func: Callable[..., Any]) -> bool:
+    """Whether ``func`` takes at least one positional argument."""
+    import inspect
+
+    if isinstance(func, _OwnedCall):
+        func = func.target
+    try:
+        parameters = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.VAR_POSITIONAL,
+        )
+        for parameter in parameters
+    )
+
+
 def _accepts_keyword(func: Callable[..., Any], name: str) -> bool:
     """Whether ``func`` takes keyword ``name`` (or any keyword)."""
     import inspect
@@ -1605,14 +1626,16 @@ class AuthoringBridge:
         kwargs: dict[str, Any] = {"confirm": "ok"}
         if _accepts_keyword(admit_fn, "confirmation_channel"):
             kwargs["confirmation_channel"] = ADMIT_CONFIRMATION_CHANNEL
+        # Pick the call shape from the signature. Retrying on TypeError could
+        # run Flow's admit twice when the TypeError came from inside it.
+        if _accepts_keyword(admit_fn, "confirm"):
+            call = lambda: admit_fn(**kwargs)  # noqa: E731
+        elif _takes_positional(admit_fn):
+            call = lambda: admit_fn("ok")  # noqa: E731
+        else:
+            call = admit_fn
         try:
-            try:
-                raw = admit_fn(**kwargs)
-            except TypeError:
-                try:
-                    raw = admit_fn("ok")
-                except TypeError:
-                    raw = admit_fn()
+            raw = call()
         except Exception as exc:
             mapped = self._map_session_error(exc)
             if mapped.get("error"):

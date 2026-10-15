@@ -334,6 +334,21 @@ def test_admit_records_confirmation_channel_when_flow_accepts_it():
     assert ("admit", "ok", "mcp_form_elicitation") in session.calls
 
 
+def test_admit_calls_flow_once_even_when_flow_raises_type_error():
+    class BrokenSession(FakeAuthoringSession):
+        def admit(self, confirm=None):
+            self.calls.append(("admit", confirm))
+            raise TypeError("bug inside Flow admit")
+
+    session = BrokenSession()
+    bridge = AuthoringBridge(session)
+    with pytest.raises(AuthoringError, match="bug inside Flow admit"):
+        bridge.dispatch("admit", {}, human_confirmed=True)
+    assert [call for call in session.calls if isinstance(call, tuple) and call[0] == "admit"] == [
+        ("admit", "ok")
+    ]
+
+
 def test_admit_extra_arguments_refuse_even_after_confirmation():
     session = FakeAuthoringSession()
     bridge = AuthoringBridge(session)
