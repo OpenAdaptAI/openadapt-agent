@@ -1,42 +1,30 @@
 """End to end: halt -> needs_repair -> teach_repair -> person approves -> replay passes.
 
-Drives the real Flow replayer, teach loop, and repair lifecycle on Flow's
-``modal-once`` fixture (a survey dialog covers the confirm banner). The
-fixture's fake backend and vision live in Flow's test suite, so this test runs
-when ``OPENADAPT_FLOW_SRC`` points at an openadapt-flow checkout whose
-installed package has ``openadapt_flow.repair.agent_teach``. It is skipped
-otherwise.
-
-Campaign verdicts are recorded as fixed passing results. Flow's own tests
-cover the campaign batteries, and on this synthetic dismiss button the
-production fault campaign refuses (no identity evidence), which is the
-correct behavior for a real deployment.
+Runs on ``openadapt_flow.repair.dialog_fixture``: a rendered app where a
+survey dialog covers the confirm banner after Save. Flow's real replayer,
+OCR, teach loop, and replay and fault campaigns run; nothing is stubbed
+except the scrubber. The halted app instance stays open and is the screen the
+agent's click lands on, as a held browser page would be. Skipped when the
+installed openadapt-flow has no dialog fixture.
 """
 
 from __future__ import annotations
 
 import base64
 import io
-import os
-import sys
 from pathlib import Path
 
 import pytest
 
-FLOW_SRC = os.environ.get("OPENADAPT_FLOW_SRC")
-pytest.importorskip("openadapt_flow.repair.agent_teach")
-if not FLOW_SRC or not (Path(FLOW_SRC) / "tests" / "test_halt_learn_loop.py").is_file():
-    pytest.skip("set OPENADAPT_FLOW_SRC to an openadapt-flow checkout", allow_module_level=True)
-sys.path.insert(0, FLOW_SRC)
+pytest.importorskip("openadapt_flow.repair.dialog_fixture")
 
-import numpy as np  # noqa: E402
 from openadapt_flow.ir import Workflow  # noqa: E402
 from openadapt_flow.repair import Actor, CanaryRunObservation, RepairStore  # noqa: E402
-from openadapt_flow.repair.candidate import CampaignResult  # noqa: E402
+from openadapt_flow.repair import dialog_fixture as fx  # noqa: E402
+from openadapt_flow.repair.cli import _run_campaign  # noqa: E402
 from openadapt_flow.repair.lifecycle import RepairLifecycleError  # noqa: E402
+from openadapt_flow.runtime.replayer import Replayer  # noqa: E402
 from PIL import Image  # noqa: E402
-from tests.test_halt_learn_loop import MODAL_FACT, _replay  # noqa: E402
-from tests.test_teach_cli import _base_bundle  # noqa: E402
 
 from openadapt_agent.bridge import AgentBridge  # noqa: E402
 from openadapt_agent.cards import WorkflowCard  # noqa: E402
@@ -50,35 +38,24 @@ PERSON = Actor(kind="human", id="reviewer")
 AUTOMATION = Actor(kind="automation", id="ci")
 
 
-def _frame(with_dialog: bool) -> bytes:
-    import cv2
-
-    image = np.full((800, 1280, 3), 255, np.uint8)
-    if with_dialog:
-        cv2.rectangle(image, (60, 84), (220, 132), (40, 40, 40), -1)
-        cv2.putText(image, "Dismiss", (74, 116), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-    ok, buf = cv2.imencode(".png", image)
-    assert ok
-    return buf.tobytes()
-
-
-class DialogScreen:
-    """The halted app: the dialog is up until something clicks Dismiss."""
+class HeldPage:
+    """The halted app, kept open for the repair, as Flow's hold would."""
 
     def __init__(self) -> None:
-        self.dialog = True
+        self.app: fx.DialogApp | None = None
         self.clicks: list[tuple[int, int]] = []
 
     def screenshot(self) -> bytes:
-        return _frame(self.dialog)
+        assert self.app is not None
+        return self.app.screenshot()
 
     def click(self, x: int, y: int) -> None:
+        assert self.app is not None
         self.clicks.append((x, y))
-        if 60 <= x <= 220 and 84 <= y <= 132:
-            self.dialog = False
+        self.app.click(x, y)
 
     def viewport(self) -> tuple[int, int]:
-        return (1280, 800)
+        return fx.VIEWPORT
 
 
 class Scrubber:
@@ -93,20 +70,19 @@ class Scrubber:
 
 
 class ReplayEngine:
-    """Runs the active bundle through Flow's real replayer on modal-once."""
+    """Runs the active bundle through Flow's real replayer on the fixture."""
 
-    def __init__(self, tmp: Path, desk: RepairDesk, bundle: Path) -> None:
-        self.tmp, self.desk, self.bundle = tmp, desk, bundle
-        self.model_calls = 0
+    def __init__(self, tmp: Path, desk: RepairDesk, bundle: Path, held: HeldPage) -> None:
+        self.tmp, self.desk, self.bundle, self.held = tmp, desk, bundle, held
 
     def execute(self, entry, run_id, inputs, raw) -> EngineResult:
         bundle = self.desk.active_bundle(entry.name, self.bundle)
         run_dir = self.tmp / "runs" / run_id
-        report, _ = _replay(
-            Workflow.load(bundle), modal_text=MODAL_FACT, bundle=bundle, run_dir=run_dir
-        )
+        app = fx.DialogApp()
+        report = Replayer(app).run(Workflow.load(bundle), bundle_dir=bundle, run_dir=run_dir)
         if report.success:
             return EngineResult(reason="saved_and_checked", model_calls=0)
+        self.held.app = app
         return EngineResult(
             reason="unexpected_screen",
             halt_step_id=report.halt.state_id,
@@ -119,15 +95,11 @@ class ReplayEngine:
         return None
 
 
-def _passed(kind: str) -> CampaignResult:
-    return CampaignResult(campaign=kind, passed=True, total=5, failed=0)
-
-
 def test_halt_teach_approve_replay(tmp_path: Path) -> None:
-    bundle = _base_bundle(tmp_path)
+    bundle = fx.base_bundle(tmp_path / "bundle")
     access = tmp_path / "access.json"
     set_access(access, workflow=WORKFLOW, mode="scrubbed_only", enabled_by="admin")
-    screen = DialogScreen()
+    screen = HeldPage()
     desk = RepairDesk(
         tmp_path / ".repair",
         RepairAccessPolicy(access),
@@ -139,7 +111,9 @@ def test_halt_teach_approve_replay(tmp_path: Path) -> None:
         None, RunnerConfig(runs_dir=tmp_path / "runs"), allow_run=True, repair_desk=desk
     )
     card = WorkflowCard(name=WORKFLOW, purpose="Save an encounter.", done_means="Saved.")
-    bridge.catalog[WORKFLOW] = CatalogEntry(card=card, engine=ReplayEngine(tmp_path, desk, bundle))
+    bridge.catalog[WORKFLOW] = CatalogEntry(
+        card=card, engine=ReplayEngine(tmp_path, desk, bundle, screen)
+    )
 
     def run(request_id: str) -> dict:
         return bridge.dispatch(
@@ -162,11 +136,15 @@ def test_halt_teach_approve_replay(tmp_path: Path) -> None:
         "teach_repair",
         {
             "repair_token": block["repair_token"],
-            "demonstration": {"action": "click", "x": 140, "y": 108},
+            "demonstration": {
+                "action": "click",
+                "x": fx.DISMISS_CLICK[0],
+                "y": fx.DISMISS_CLICK[1],
+            },
         },
     )
     assert taught["status"] == "pending_approval"
-    assert screen.clicks == [(140, 108)]
+    assert screen.clicks == [fx.DISMISS_CLICK]
 
     # The token works once.
     with pytest.raises(Exception, match="already used"):
@@ -174,7 +152,11 @@ def test_halt_teach_approve_replay(tmp_path: Path) -> None:
             "teach_repair",
             {
                 "repair_token": block["repair_token"],
-                "demonstration": {"action": "click", "x": 140, "y": 108},
+                "demonstration": {
+                    "action": "click",
+                    "x": fx.DISMISS_CLICK[0],
+                    "y": fx.DISMISS_CLICK[1],
+                },
             },
         )
 
@@ -196,8 +178,11 @@ def test_halt_teach_approve_replay(tmp_path: Path) -> None:
     with pytest.raises(RepairLifecycleError):
         store.review(candidate.candidate_id, Actor(kind="human", id=AGENT))
     store.review(candidate.candidate_id, PERSON)
-    store.record_campaign(candidate.candidate_id, _passed("replay"), AUTOMATION)
-    store.record_campaign(candidate.candidate_id, _passed("fault"), AUTOMATION)
+    # Flow's production campaigns, with its real resolver and OCR.
+    for kind in ("replay", "fault"):
+        campaign = _run_campaign(store.load_candidate(candidate.candidate_id), kind)
+        assert campaign.passed, [c.detail for c in campaign.cases if not c.passed]
+        store.record_campaign(candidate.candidate_id, campaign, AUTOMATION)
     with pytest.raises(RepairLifecycleError):
         store.approve(candidate.candidate_id, Actor(kind="human", id=AGENT))
     store.approve(candidate.candidate_id, PERSON, non_interactive=True)
