@@ -50,8 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "serve",
         help=(
-            "Serve workflows to your AI agent over MCP (stdio). With no flags, "
-            "serve the sandbox."
+            "Serve workflows to your AI agent over MCP (stdio). With no flags, serve the sandbox."
         ),
     )
     p.add_argument(
@@ -341,6 +340,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     connect.set_defaults(func=_cmd_authoring_connect)
 
+    learn = sub.add_parser(
+        "learn",
+        help=(
+            "Let a Claude computer-use agent do the task once, then compile "
+            "its run into a workflow that later runs replay with no model calls"
+        ),
+        description=(
+            "Run 1 is done by a Claude computer-use agent in a new Chromium "
+            "window. Its clicks and typing are recorded, steps with no visible "
+            "effect are removed, and the rest is compiled into a draft. You "
+            "accept the draft at the end; nothing is accepted for you. Needs "
+            "ANTHROPIC_API_KEY. Do not put passwords in the task: typed text "
+            "is recorded."
+        ),
+    )
+    learn.add_argument("--url", required=True, help="Start page of the app")
+    task = learn.add_mutually_exclusive_group(required=True)
+    task.add_argument("--task", help="What the agent should do")
+    task.add_argument("--task-file", metavar="FILE", help="Read the task from a file")
+    learn.add_argument(
+        "--params",
+        metavar="JSON",
+        default=None,
+        help=(
+            "Task inputs as a JSON object. Typed text that equals a value is "
+            "recorded as that input, so later runs can use other values."
+        ),
+    )
+    learn.add_argument("--out", required=True, metavar="DIR", help="Work directory")
+    learn.add_argument("--model", default=None, help="Claude model (default claude-sonnet-5-5)")
+    learn.add_argument(
+        "--max-cost", type=float, default=1.0, metavar="USD", help="Cost cap for run 1"
+    )
+    learn.add_argument("--max-actions", type=int, default=80)
+    learn.add_argument("--headed", action="store_true", help="Show the browser window")
+    learn.set_defaults(func=_cmd_learn)
+
     p = sub.add_parser(
         "emit-skill",
         help=(
@@ -424,8 +460,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 2
     if args.authoring and args.allow_run and not args.bundles:
         print(
-            "serve: --authoring does not imply --allow-run; --allow-run still "
-            "requires --bundles",
+            "serve: --authoring does not imply --allow-run; --allow-run still requires --bundles",
             file=sys.stderr,
         )
         return 2
@@ -538,9 +573,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
             runs_dir = Path(args.runs_dir).expanduser() if args.runs_dir else default_sandbox_dir()
             runs_dir.mkdir(parents=True, exist_ok=True)
-            sandbox_engine = SandboxEngine(
-                runs_dir, engine=args.sandbox_engine, headed=args.headed
-            )
+            sandbox_engine = SandboxEngine(runs_dir, engine=args.sandbox_engine, headed=args.headed)
             bridge = AgentBridge(
                 None,
                 RunnerConfig(runs_dir=runs_dir, timeout_s=args.timeout),
@@ -567,8 +600,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         # Resolve once, so every part of the server (runs, pauses, the
         # request-id ledger) uses the same absolute folder.
         runs_dir = (
-            Path(args.runs_dir) if args.runs_dir else default_runs_dir()
-        ).expanduser().resolve()
+            (Path(args.runs_dir) if args.runs_dir else default_runs_dir()).expanduser().resolve()
+        )
         runner_config = RunnerConfig(
             flow_cli=(tuple(shlex.split(args.flow_cli)) if args.flow_cli else default_flow_cli()),
             runs_dir=runs_dir,
@@ -758,6 +791,84 @@ def _cmd_repair_approve(args: argparse.Namespace) -> int:
         return 1
     print("Approved for this repair only.")
     return 0
+
+
+def _confirm_on_terminal(summary: dict) -> bool:
+    if not sys.stdin.isatty():
+        return False
+    distilled = summary.get("distilled") or {}
+    agent = summary.get("agent") or {}
+    print(
+        f"Draft compiled: {distilled.get('steps_out', '?')} steps "
+        f"({len(distilled.get('dropped') or [])} removed from the agent's "
+        f"{distilled.get('steps_in', '?')}). Agent run: "
+        f"{agent.get('model_calls', 0)} model calls, ${agent.get('cost_usd', 0.0):.3f}.",
+        file=sys.stderr,
+    )
+    print(f"Bundle: {summary.get('bundle_dir')}", file=sys.stderr)
+    answer = input("Accept this workflow for later runs? Type yes to accept: ")
+    return answer.strip().lower() == "yes"
+
+
+def _cmd_learn(args: argparse.Namespace) -> int:
+    import json
+
+    try:
+        import anthropic
+    except ImportError:
+        print("learn needs the anthropic package: pip install anthropic", file=sys.stderr)
+        return 2
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        print("learn needs ANTHROPIC_API_KEY", file=sys.stderr)
+        return 2
+    from openadapt_flow.authoring import AuthoringSession
+    from openadapt_flow.backends.playwright_backend import PlaywrightBackend
+
+    from openadapt_agent.learn import DEFAULT_MODEL, learn
+
+    task = args.task if args.task is not None else Path(args.task_file).read_text()
+    params = json.loads(args.params) if args.params else {}
+    if not isinstance(params, dict):
+        print("--params must be a JSON object", file=sys.stderr)
+        return 2
+    out = Path(args.out)
+    if out.exists() and any(out.iterdir()):
+        print(f"{out} is not empty", file=sys.stderr)
+        return 2
+    out.mkdir(parents=True, exist_ok=True)
+    backend, close = PlaywrightBackend.launch(args.url, headless=not args.headed)
+    try:
+        session = AuthoringSession(backend, out / "recording", backend_kind="web", app_url=args.url)
+        result = learn(
+            session,
+            task,
+            client=anthropic.Anthropic(api_key=key),
+            capture=backend.screenshot,
+            viewport=tuple(backend.viewport),
+            bundle_dir=out / "bundle",
+            params={str(k): str(v) for k, v in params.items()},
+            model=args.model or DEFAULT_MODEL,
+            max_actions=args.max_actions,
+            max_cost_usd=args.max_cost,
+            confirm=_confirm_on_terminal,
+            log=lambda msg: print(msg, file=sys.stderr),
+        )
+    finally:
+        close()
+    summary = result.to_dict()
+    summary["agent"].pop("action_log", None)
+    (out / "learn.json").write_text(json.dumps(result.to_dict(), indent=2, default=str) + "\n")
+    print(json.dumps(summary, indent=2, default=str))
+    if result.status == "accepted":
+        return 0
+    if result.status == "needs_human_admit":
+        print(
+            "Not accepted. The draft is not used until a person accepts it.",
+            file=sys.stderr,
+        )
+        return 3
+    return 1
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
