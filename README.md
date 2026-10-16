@@ -126,7 +126,7 @@ claude mcp add openadapt -- uvx --python 3.12 --from 'openadapt-agent[tutorial] 
 
 When the server starts, Flow records the workflow once and, if needed, downloads a browser (about 300 MB). The first request waits for that. In our test on a Mac, the first request took about 80 seconds. The call returned `running` after 60 seconds, and the agent called `get_run` for the result. If setup takes more than 15 minutes, the request ends `did_not_run`. With Flow, a `done` result has `proof: "local"` instead of `"simulated"`.
 
-Version 2.1.0 on PyPI also has the `tutorial` extra, so `uvx --python 3.12 --from 'openadapt-agent[tutorial]' openadapt-agent serve` works too.
+The simulated sandbox suggests the same command in its `list_workflows` result.
 
 ## What your agent gets back
 
