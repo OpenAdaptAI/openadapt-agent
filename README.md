@@ -14,6 +14,17 @@ Use it if your agent reads referrals, intake forms, or authorizations and works 
 
 Pick one task your agent hands to staff today and [talk to us about connecting it](https://openadapt.ai/qualify?why=embed). Engineers can [try the sandbox](#try-it-in-three-steps) first.
 
+## Give your agent a program, not a mouse
+
+Your agent doesn't send screenshots to a model and click. It calls a taught workflow as one typed tool, OpenAdapt runs the same steps every time, and by default your agent gets back an outcome and counts, not screens or recorded values.
+
+```bash
+openadapt-agent serve --mode production --bundles <bundle or directory of bundles>
+openadapt-agent emit-skill <bundle> --out ~/.claude/skills
+```
+
+[Try it in three steps](#try-it-in-three-steps) runs a sandbox with no account. [Serve your own workflows](#serve-your-own-workflows) and [Write an Agent Skill](#write-an-agent-skill) cover both commands.
+
 ## What changes for your customer's team
 
 | Step | Today | With OpenAdapt |
