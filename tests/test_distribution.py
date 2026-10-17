@@ -259,6 +259,8 @@ def _readme_first_paragraph() -> str:
                 or stripped.startswith("#")
                 or stripped.startswith("[")
                 or stripped.startswith("`")
+                # A notice above the description (the "moved" note).
+                or stripped.startswith(">")
             ):
                 continue
             started = True
