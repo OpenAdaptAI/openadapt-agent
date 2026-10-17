@@ -1,5 +1,7 @@
 # OpenAdapt Agent
 
+> This repository has moved to the [OpenAdapt monorepo](https://github.com/OpenAdaptAI/OpenAdapt) (`packages/agent`). It is archived and read-only; open issues and PRs there. The PyPI package name `openadapt-agent` is unchanged.
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)](https://www.python.org/downloads/)
 
