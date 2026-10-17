@@ -53,23 +53,23 @@ flowchart LR
 
 | You build | OpenAdapt provides |
 | --- | --- |
-| The agent that reads documents and decides what to enter | A workflow built from one recording of a person doing the task in the real app |
+| The agent that reads documents and decides what to enter | A workflow learned from one or more demonstrations in the real app, where a person or an agent shows the task |
 | The call to `run_workflow`, with your own `request_id` | The run on your customer's computer, with a right-record check before it types and a record check after it saves |
 | What your product does with each outcome | One result per request, and no second entry when your agent repeats a `request_id` |
 | Your tests against the four outcomes | A sandbox that returns each outcome on demand |
 
-Your customer provides the computer and a person for runs that stop. Someone who does the task today records it, or your agent drives the recording. A person accepts the result before it runs, and on native Windows apps, Citrix and remote desktop a person has to do the recording. Your agent can guide that recording (see [Record a first workflow](#record-a-first-workflow)), or [talk to us](https://openadapt.ai/qualify?why=embed) about setting it up.
+Your customer provides the computer and a person for runs that stop. A person or an agent shows the task, in web apps, native Windows apps, and over Citrix or remote desktop. A person accepts the result before it runs. See [Record a first workflow](#record-a-first-workflow), or [talk to us](https://openadapt.ai/qualify?why=embed) about setting it up.
 
 ## Try it in three steps
 
 The sandbox is a practice server that needs no account. It has one workflow, `add_triage_note`, which adds a note to the first referral in MockMed, a test clinic app with made-up patients.
 
-You need [Claude Code](https://claude.com/claude-code) (signed in), [uv](https://docs.astral.sh/uv/), and git. To use a different client or your own code, see [Connect your own agent](#connect-your-own-agent).
+You need [Claude Code](https://claude.com/claude-code) (signed in) and [uv](https://docs.astral.sh/uv/). To use a different client or your own code, see [Connect your own agent](#connect-your-own-agent).
 
 1. Add the sandbox server. Claude Code saves it for the current folder only.
 
    ```bash
-   claude mcp add openadapt -- uvx --python 3.12 --from git+https://github.com/OpenAdaptAI/openadapt-agent openadapt-agent serve
+   claude mcp add openadapt -- uvx --python 3.12 openadapt-agent serve
    ```
 
 2. In the same folder, start Claude Code with `claude`. Claude Code starts the server.
@@ -99,7 +99,7 @@ The result looks like this (some fields left out):
 
 This install simulates each run without opening MockMed, and every result says so. To watch the real engine do the work, see [Drive MockMed with the real engine](#drive-mockmed-with-the-real-engine).
 
-Version 2.1.0 on PyPI includes the sandbox, so step 1 can also be `claude mcp add openadapt -- uvx --python 3.12 openadapt-agent serve`.
+openadapt-agent installs from PyPI and requires openadapt-flow 2.1.0 or later, which is on PyPI and installs with it. To try unreleased changes, use `--from git+https://github.com/OpenAdaptAI/openadapt-agent` in place of the package name.
 
 ### See every outcome
 
@@ -121,7 +121,7 @@ The `tutorial` extra makes openadapt-flow (Flow), the engine behind OpenAdapt, d
 
 ```bash
 claude mcp remove openadapt
-claude mcp add openadapt -- uvx --python 3.12 --from 'openadapt-agent[tutorial] @ git+https://github.com/OpenAdaptAI/openadapt-agent' openadapt-agent serve
+claude mcp add openadapt -- uvx --python 3.12 --from 'openadapt-agent[tutorial]' openadapt-agent serve
 ```
 
 When the server starts, Flow records the workflow once and, if needed, downloads a browser (about 300 MB). The first request waits for that. In our test on a Mac, the first request took about 80 seconds. The call returned `running` after 60 seconds, and the agent called `get_run` for the result. If setup takes more than 15 minutes, the request ends `did_not_run`. With Flow, a `done` result has `proof: "local"` instead of `"simulated"`.
@@ -193,7 +193,7 @@ Any MCP client can start the server with the command `uvx`. In a client that rea
   "mcpServers": {
     "openadapt": {
       "command": "uvx",
-      "args": ["--python", "3.12", "--from", "git+https://github.com/OpenAdaptAI/openadapt-agent", "openadapt-agent", "serve"]
+      "args": ["--python", "3.12", "openadapt-agent", "serve"]
     }
   }
 }
@@ -210,8 +210,7 @@ from mcp.client.stdio import stdio_client
 
 SERVER = StdioServerParameters(
     command="uvx",
-    args=["--python", "3.12", "--from", "git+https://github.com/OpenAdaptAI/openadapt-agent",
-          "openadapt-agent", "serve"],
+    args=["--python", "3.12", "openadapt-agent", "serve"],
 )
 
 
@@ -236,7 +235,7 @@ The SDK starts the server with only a few environment variables. To pass others,
 [scripts/smoke_client.py](scripts/smoke_client.py) is a fuller example that runs every sandbox case. From a clone of this repository, run `pip install -e .`, then:
 
 ```bash
-python scripts/smoke_client.py -- uvx --python 3.12 --from git+https://github.com/OpenAdaptAI/openadapt-agent openadapt-agent serve
+python scripts/smoke_client.py -- uvx --python 3.12 openadapt-agent serve
 ```
 
 If your agent runs in your own cloud, it can't reach this server, which has no network listener. The program that starts the server has to run on your customer's computer. One way to do that is a small worker there: it takes requests from your service over a connection it opens, starts this server, calls `run_workflow`, and sends each result back. The worker acts as your agent, so protect its connection like any other route to patient data. For a hosted route instead, [talk to us](https://openadapt.ai/qualify?why=embed).
@@ -337,12 +336,12 @@ If a workflow's name would come out as either one, emit-skill names the skill `o
 
 ### Record a first workflow
 
-`serve --authoring` adds recording tools, such as `observe`, `start_record`, `click`, `pause_for_input`, `stop_record`, `compile`, and `admit`. [docs/DESIGN.md](docs/DESIGN.md#recording-tools) lists all 14. Your agent uses them to help a person record a task in a web app. The recording server doesn't turn on runs.
+`serve --authoring` adds recording tools, such as `observe`, `start_record`, `click`, `pause_for_input`, `stop_record`, `compile`, and `admit`. [docs/DESIGN.md](docs/DESIGN.md#recording-tools) lists all 14. A person or your agent shows the task with them, in a web app, a native Windows app, or an RDP or Citrix session, and a person stays at the computer to sign in and accept the result. A task can be learned from one or more demonstrations. The recording server doesn't turn on runs.
 
 1. Add a recording server. `--url` opens the app in a new Chromium window with no saved sign-ins, and `--headed` keeps that window visible so the person can sign in.
 
    ```bash
-   claude mcp add openadapt-authoring -- uvx --python 3.12 --from 'openadapt-agent[tutorial] @ git+https://github.com/OpenAdaptAI/openadapt-agent' openadapt-agent serve --authoring --url https://app.example.com --headed
+   claude mcp add openadapt-authoring -- uvx --python 3.12 --from 'openadapt-agent[tutorial]' openadapt-agent serve --authoring --url https://app.example.com --headed
    ```
 
 2. Ask your agent to record the task with the person. When the agent pauses for sign-in, the person signs in to the app in that window.
@@ -350,7 +349,15 @@ If a workflow's name would come out as either one, emit-skill names the skill `o
 4. The agent calls `admit`. Your MCP client then shows the person a confirmation form, and only the person's answer there accepts the bundle. If the client can't show forms (MCP form elicitation), `admit` refuses and nothing is accepted.
 5. Get the bundle ready to run (see [Get a workflow ready to run](#get-a-workflow-ready-to-run)). Then serve it with `--mode production --bundles <runs-dir>/authoring/bundle`.
 
-Use `--url URL --headed` on every platform. Without `--url`, the server exits on Linux, and on macOS it uses whatever window is in front when the client starts the server, or exits. For Windows desktop apps, Citrix, and RDP, the recording tools can only tell the person what to click. Record those apps with Flow's own recorder.
+Use `--url URL --headed` for a web app on every platform. Without `--url`, the server exits on Linux, and on macOS it uses whatever window is in front when the client starts the server, or exits.
+
+For a native Windows app, start Flow's Windows agent server in the signed-in desktop session on the Windows computer (`python -m openadapt_flow.backends.win_agent.server --port 5001`) and pass `--windows-agent-url http://localhost:5001`. The agent can run on that computer or on another one, such as a Mac. The server listens only on the Windows computer by default, so from another computer forward the port over SSH or serve it over HTTPS. Your agent's clicks and keys go through the same synthetic-input path that replay uses, and the recording keeps each clicked control's UI Automation id when Windows reports one. Set `OAFLOW_AGENT_TOKEN` to the same value for the server and the agent.
+
+For an RDP or Citrix session, pass `--remote-window APP` (the client app, for example `"Microsoft Remote Desktop"`) or `--citrix`, and `--remote-window-title` when the app has more than one window. A remote session is screen-only: there's no DOM or UI Automation tree, so `observe` returns no nodes and your agent clicks x,y pixels in the client window and presses keys, the way a person would. To let your agent see that window, add `--authoring-screens scrubbed`, which turns on a `screen` tool that returns the frame with identifiers scrubbed and shares nothing if scrubbing fails. `--authoring-screens unscrubbed` skips scrubbing. Screens are off by default.
+
+[Recording on Windows, RDP and Citrix](https://github.com/OpenAdaptAI/openadapt-flow/blob/main/docs/RECORDING_ON_WINDOWS_RDP_CITRIX.md) explains the Windows agent server, why it's needed when the agent runs on another computer, how to start it, the token, and the RDP and Citrix pixel path.
+
+The recording marks every step as the agent's or the person's (`actor` in `events.jsonl`, `demonstrated_by` in `meta.json`), and a person still accepts the result. On Windows with none of these flags, the tools can only tell the person what to click.
 
 ChatGPT and Claude in a web browser can't start a server on your computer. To record from one of them, start at https://openadapt.ai/start. When openadapt.ai gives you a runner link for the recording job (it contains `bind=oab_`), run this on the computer that has the app:
 
