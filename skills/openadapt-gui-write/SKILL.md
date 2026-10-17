@@ -34,6 +34,6 @@ The sandbox serves one synthetic workflow, `add_triage_note`. Its `sandbox_case`
 claude mcp add openadapt -- uvx --python 3.12 openadapt-agent serve
 ```
 
-This installs openadapt-agent from PyPI. It requires openadapt-flow 2.1.0 or later, which is on PyPI and installs with it.
+This installs openadapt-agent from PyPI. It requires openadapt-flow 2.2.0 or later, which is on PyPI and installs with it.
 
 The skill name is openadapt-gui-write. It is never called computer use: your agent decides, and OpenAdapt does the entry.

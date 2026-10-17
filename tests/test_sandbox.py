@@ -70,7 +70,7 @@ def test_each_case_returns_its_outcome(sandbox_bridge, case):
 
 
 def test_simulated_engine_hint_installs_a_version_with_the_sandbox(sandbox_bridge):
-    # The sandbox and openadapt-flow 2.1.0 are on PyPI: the hint installs the
+    # The sandbox and openadapt-flow 2.2.0 are on PyPI: the hint installs the
     # tutorial extra from PyPI, not from a GitHub ref.
     detail = sandbox_bridge.dispatch("list_workflows", {})["sandbox"]["engine_detail"]
     assert TUTORIAL_SERVE_COMMAND in detail

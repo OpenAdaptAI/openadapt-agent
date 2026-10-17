@@ -99,7 +99,7 @@ The result looks like this (some fields left out):
 
 This install simulates each run without opening MockMed, and every result says so. To watch the real engine do the work, see [Drive MockMed with the real engine](#drive-mockmed-with-the-real-engine).
 
-openadapt-agent installs from PyPI and requires openadapt-flow 2.1.0 or later, which is on PyPI and installs with it. To try unreleased changes, use `--from git+https://github.com/OpenAdaptAI/openadapt-agent` in place of the package name.
+openadapt-agent installs from PyPI and requires openadapt-flow 2.2.0 or later, which is on PyPI and installs with it. To try unreleased changes, use `--from git+https://github.com/OpenAdaptAI/openadapt-agent` in place of the package name.
 
 ### See every outcome
 

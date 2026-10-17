@@ -34,7 +34,7 @@ jobs:
         if: matrix.dependency-set == 'floor'
         run: >-
           pip install -e ".[dev]"
-          "openadapt-flow==2.1.0"
+          "openadapt-flow==2.2.0"
           "mcp==1.28.0"
       - name: Install MCP 2 floor
         if: matrix.dependency-set == 'mcp2-floor'
@@ -91,7 +91,7 @@ jobs:
           cache: pip
       - name: Install with the released Flow (ships openadapt_flow.repair.dialog_fixture)
         run: |
-          pip install -e ".[dev]" "openadapt-flow>=2.1.0,<3"
+          pip install -e ".[dev]" "openadapt-flow>=2.2.0,<3"
           pip install opencv-python-headless rapidocr-onnxruntime
       - name: Run the repair end-to-end test
         env:
